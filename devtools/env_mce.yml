@@ -6,13 +6,16 @@ channels:
 
 dependencies:
   - python=3.11
+  - numpy
+  - scipy
+  - numba
+  - requests
   - mcce
   - pygraphviz
-  - scipy
   - pandas
   - matplotlib
+  - seaborn
   - xlrd
   - openpyxl
-  - numpy
-  - requests
+
 prefix: /home/cat/miniconda3/envs/mce
