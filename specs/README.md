@@ -1,9 +1,10 @@
 # Project Specifications
 
-## Project: Uncouple MCCE Step3 from Delphi
+## Project: Uncouple MCCE Step3 from Delphi  
 
 Currently, the interactions energies (electrostatics, and Van der Waals) calculated in Step3 (S3) use a third-party program called Delphi, which is a Poisson-Boltzmann equation solver (PBS) written in Fortran (ver=?).  
 The python module /bin/Step3.py is a command line program that calls MCCE over threads once command line args and other prerequisites are processed. S3 requires objects defined in /lib/mcce.h and /lib/energies.c (at least).
+
 ---
 
 ### General requirements:
