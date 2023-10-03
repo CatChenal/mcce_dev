@@ -61,6 +61,8 @@ venv.bak/
 
 # vscode workspace:
 *.code-workspace
+# wsl tracks
+*Zone.Identifier
 
 # Jupyter Notebook
 .ipynb_checkpoints
