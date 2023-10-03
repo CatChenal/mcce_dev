@@ -186,7 +186,7 @@ class MC:
             # Ask for redo:
             # reply = input(msg).lower()[0]
             # if reply != 'y':
-            #    sys.exit(0)
+            #    return
             #
 
         # Only start variables assignment after a possible exit point (if possible).
