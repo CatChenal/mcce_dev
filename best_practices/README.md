@@ -6,7 +6,8 @@ Note: Most of these __strong__ recommendations will be implemented for linux-lik
 
 # 1. Customize your `.bashrc` file
 It make navigation easier and safer.
- * [Customize_bashrc]()
+ * [Customize_bashrc (nb)](Customize_bashrc.ipynb)
+ * [Customize_bashrc (md)](Customize_bashrc.md)
 
 # 2. Use the `python-dotenv` library
 Keep your local environemnt and credential private... And use `.gitignore` to make sure they really are.
