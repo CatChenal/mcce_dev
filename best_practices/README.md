@@ -5,7 +5,8 @@ Note: Most of these __strong__ recommendations will be implemented for linux-lik
 [WIP}: The links in the the following contents will be active when the underlaying documents are created: this is a road map.
 
 # 1. Customize your `.bashrc` file
-It make navigation easier and safer.
+It make navigation easier and safer (among many other things).
+ * [test Customize_bashrc.ipynb](https://github.com/CatChenal/mcce_dev/blob/main/best_practices/Customize_bashrc.md "Customize_bashrc" target="_blank")
  * [Customize_bashrc (nb)](Customize_bashrc.ipynb)
  * [Customize_bashrc (md)](Customize_bashrc.md)
 
