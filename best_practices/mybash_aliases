@@ -11,8 +11,11 @@ alias du='du -chx | grep total'
 alias df='df -kTh'
 
 ## safe version or rm and mv commands: use the interactive version as the default one
-alias rm='/bin/rm -i'
-alias mv='/bin/mv -i'
+alias rmi='/bin/rm -i'
+alias cpi='/bin/cp -i'
+
+#alias rm='/bin/rm -i'
+alias mvi='/bin/mv -i'
 
 ## navigation aliases:
 alias up='cd ../; lt'

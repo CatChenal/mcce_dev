@@ -1,0 +1,45 @@
+import numpy as np
+import scipy.sparse as sp
+import scipy.linalg as sl
+
+class PoissonBoltzmannSolver:
+
+    def __init__(self, epsilon, rho, k):
+        """
+        Initialize a Poisson-Boltzmann solver.
+
+        Args:
+            epsilon: A NumPy array containing the dielectric constant.
+            rho: A NumPy array containing the charge density.
+            k: A NumPy array containing the Debye-Hückel parameter.
+        """
+
+        self.epsilon = epsilon
+        self.rho = rho
+        self.k = k
+
+    def solve(self):
+        """
+        Solve the Poisson-Boltzmann equation.
+
+        Returns:
+            A NumPy array containing the electric potential.
+        """
+
+        # Create the sparse matrix.
+        A = sp.sparse.dok_matrix((self.epsilon.shape[0], self.epsilon.shape[0]))
+        for i in range(self.epsilon.shape[0]):
+            for j in range(self.epsilon.shape[0]):
+                A[i, j] = -1.0 / self.epsilon[i] * self.epsilon[j]
+
+        # Add the source term.
+        b = sp.sparse.dok_matrix((self.epsilon.shape[0],))
+        for i in range(self.epsilon.shape[0]):
+            b[i] = self.rho[i]
+
+        # Solve the linear system.
+        x = sl.solve(A, b)
+
+        # Return the electric potential.
+        return x
+==========================================================================

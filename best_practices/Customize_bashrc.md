@@ -1,3 +1,18 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,md
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.15.2
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
 <!--
 jupyter:
   jupytext:
@@ -37,19 +52,17 @@ ls -a
   3. `.bash_aliases`
 <!-- #endregion -->
 
-<!-- #region jp-MarkdownHeadingCollapsed=true -->
 # 1. `.bash_profile`
 
 ### ~/.profile: executed by the command interpreter for login shells.
 ###  This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login exists.
 
-<!-- #endregion -->
 
 ```python editable=true slideshow={"slide_type": ""}
 %pycat mybash_profile
 ```
 
-<!-- #region editable=true slideshow={"slide_type": ""} jp-MarkdownHeadingCollapsed=true -->
+<!-- #region editable=true slideshow={"slide_type": ""} -->
 # 2. `.bashrc`
 ## What should go into `.bashrc`?
 
@@ -141,11 +154,11 @@ l2a(){
 }
 <!-- #endregion -->
 
-<!-- #raw -->
+```python
 %pycat mybashrc
-<!-- #endraw -->
+```
 
-<!-- #region editable=true slideshow={"slide_type": ""} jp-MarkdownHeadingCollapsed=true -->
+<!-- #region editable=true slideshow={"slide_type": ""} -->
 # 3. `.bash_aliases`
 
 #### This is a well-named file! All your aliases should be there (to simplify your life).
@@ -170,7 +183,7 @@ to(){
 Here, `ll` and `la` are one of the many aliases defined in my `.bash_aliases` file
 <!-- #endregion -->
 
-```python editable=true slideshow={"slide_type": ""} jupyter={"outputs_hidden": true}
+```python editable=true slideshow={"slide_type": ""}
 %pycat mybash_aliases
 ```
 
