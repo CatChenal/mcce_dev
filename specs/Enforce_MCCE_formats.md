@@ -1,9 +1,12 @@
+<!-- pylint issue: Use <br> for line breaks instead of md 2 blank chars;
+ Could not find solution either with .pylintrc or .pre-commit.yml.
+ -->
+
 # Enforce MCCE formats
 
-
 ## Ticker tape format (files in ms_out folder)
-If you peruse the code in bin/ms_analysis.py, you'll notice that there is a lot of processing done to
-exclude comments and blank lines.
+If you peruse the code in bin/ms_analysis.py, you'll notice that there is a lot of processing done to<br>
+exclude comments and blank lines.<br>
 Currently, the "header" looks like this:
 ```
 T:298.15,pH:5.00,eH:0.00
@@ -32,14 +35,15 @@ MC:0
 ## Changes in C codebase:
 Note: This would require:
   - a bump in version number
-  - adding simplified readers of ms_out/files
-  - create a switch to use either the simplyfied or old reader function depending on MCCE version number.
+  - adding simplified ms_out/files reader function
+  - create a switch to use either the simplified or old reader function depending on MCCE version number.
 
 
 ### Add `ms_out/format.info`
-All those comments/format information should be place an ad-hoc file, e.g. `ms_out/format.info`
-created whenever the ms_out folder is created (or retained), so that the ticker tape file would be __pure
-data__ without comments or blank lines. (`format.info` is technically called a "metadata" file.)
+All the comments/format information should be place in an ad-hoc file, e.g. `ms_out/format.info` created<br>
+whenever the ms_out folder is created (or retained), so that the ticker tape file would be __pure data__<br>
+without comments or blank lines. (`format.info` is technically called a "metadata" file.)<br>
+
 The content of that file could be:
 ```
 Text files in this folder (ms_out/) store information about microstates created by MCCE Monte Carlo runs
@@ -50,7 +54,7 @@ and Y are the values of pH, Eh for each titration point defined in run.prm.
 The format of these files is the following:
 
 Line 1: Experimental variables for temperature (K), pH and eH; MUST start with "T".
-Line 2: The method used to generate the microstates; MUST start with "METHODS".
+Line 2: The method used to generate the microstates; MUST start with "METHOD".
 Line 3: Fixed conformers line: N_FIXED (integer):FIXED_CONF_IDX (space-separated list).
 Line 4: Free residues line: N_FREE (integer):FREE_CONF_IDX (grouped & space-separated list). The conformer
         indices are grouped by residue using " ;" as a delimiter.
@@ -73,14 +77,15 @@ Note: x_CONF_IDX referred above is the index from head3.lst but starting from 0 
 
 
 ### Raise error for format violation
-Enforcing this format would mean raising errors if the first line does not start with "T", the second
-line does not start with 'METHOD', etc., with the error message referencing `format.info`.
+Enforcing this format would mean raising errors if the first line does not start with "T", the second<br>
+line does not start with 'METHOD', etc., with the error message referencing `format.info`.<br>
 
 When parsing a ms_out file in python, the error message could be the following:
 ```
 # Say `msout_file` store the name of the file being processed:
 
-ERR_MSG_MS_FRMT_pf = """This ms_out file: {} does not comply with the expected format.
+ERR_MSG_MS_FRMT_pf = """
+This ms_out file: {} does not comply with the expected format.
 No ticker tape file in ms_out should be modified. If you wish to add annotations, comments,
 explanations, etc. about the ms_out folder or a specific fle, please create a separate file.
 The file ms_out/format.info contains the file format specifications.
@@ -90,7 +95,6 @@ The file ms_out/format.info contains the file format specifications.
 
 raise ValueError(ERR_MSG_MS_FRMT_pf.format(msout_file)
 
-# Implementation note: the "_pf" ending in message variables indicate it is prepped for the
+# Implementation note: the "_pf" ending in a message variable indicate it is prepped for the
 # print `.format()` function: it contains the empty variable placeholder(s) "{}".
-
 ```
