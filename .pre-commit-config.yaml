@@ -5,11 +5,12 @@ repos:
     rev: v3.4.0
     hooks:
     -   id: trailing-whitespace
-        exclude: /[A-Za-z0-9_]+\.[md|txt]/D
+        exclude: /[A-Za-z0-9_]+\.[md|txt|lst|pdb]/D
     -   id: end-of-file-fixer
     -   id: check-yaml
-    -   id: check-added-large-files
+    #-   id: check-added-large-files
 -   repo: https://github.com/psf/black
     rev: 23.9.1
     hooks:
     -   id: black
+        exclude: /[A-Za-z0-9_]+\.[md|txt|lst|pdb]/D

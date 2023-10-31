@@ -1,6 +1,9 @@
 # Current project:
+_tmp/
 data/4lzt
 Untitled.ipynb
+scratch.ipynb
+*:Zone.Identifier
 
 # Prerequisites
 *.d

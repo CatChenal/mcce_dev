@@ -18,4 +18,4 @@ dependencies:
   - xlrd
   - openpyxl
 
-prefix: /home/cat/miniconda3/envs/mce
+prefix: $HOME/miniconda3/envs/mce
