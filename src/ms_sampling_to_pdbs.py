@@ -10,28 +10,30 @@ PRE-REQUISITES:
  - MCCE Step4 was run with the `--ms` flag to enable the persistence of the microstate folder, `ms_out`;
  - The folder provided at the command-line is a MCCE simulation output folder that contains the following
    folders or files (required):
-    o run.prm.record to obtain ROOMT and METHOD
-    o step2_out.pdb
-    o head3.lst
-    o ms_out/ folder containing one or more "msout files", e.g.: pH5eH0ms.txt
+     MCCE output:        Info extracted:
+     ...................................
+    o run.prm.record     MONTE_T and MONTE_RUNS
+    o step2_out.pdb      Coordinates
+    o head3.lst          Conformer index and id, e.g. 00017, GLU-1A0007_005
+    o ms_out/            Microstates data from "msout files", e.g. ms_out/pH5eH0ms.txt
+
+NOTE:
+-----
+The MCCE executable is not required for the purposes of this module.
+
 """
 USAGE = """
-USAGE: > ms_sampling_to_pdbs.py [<arguments and options>]
-------
- - Arguments:
-   -
+> ms_sampling_to_pdbs.py [<arguments>]
 
- - Options:
-   -
+Minimal number of arguments: --mcce_dir, --pH, --Eh, --sample_size
+> ms_sampling_to_pdbs.py --mcce_dir a/path/to/mcce/output --pH 7 --Eh 0 --sample_size 99
 
-EXAMPLES:
- 1.
- 2.
 """
 
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import datetime
 import numpy as np
+import operator
 from pathlib import Path
 import subprocess
 import sys
@@ -47,9 +49,6 @@ VALID_MC_METHODS = [
 ]
 
 
-# ... functions .............................................................
-
-
 def get_msout_filename(
     mcce_output_path: str, pH: Union[float, int], Eh: Union[float, int]
 ) -> Path:
@@ -63,9 +62,13 @@ def get_msout_filename(
     if not msout_dir.is_dir():
         raise TypeError(f"'ms_out' must be a directory in {mcce_output_path})")
 
-    prec_ph = 0 if pH.is_integer() else 1
-    prec_eh = 0 if Eh.is_integer() else 1
-
+    prec_ph, prec_eh = 0, 0
+    if isinstance(pH, float):
+        if not pH.is_integer():
+            prec_ph = 1
+    if isinstance(Eh, float):
+        if not Eh.is_integer():
+            prec_eh = 1
     ms_file = f"pH{pH:.{prec_ph}f}eH{Eh:.{prec_eh}f}ms.txt"
     fname = msout_dir.joinpath(ms_file)
     if not fname.exists():
@@ -312,41 +315,53 @@ def split_msout_file(
     return
 
 
-def sort_microstate_list(ms_list: list, by: str = None, reverse=False):
+def sort_microstate_list0(
+    ms_list: list, sort_by: str = "energy", reverse: bool = False
+) -> list:
     """Sort a list of Microstate objects by 'energy' or 'count'.
     Args:
         ms_list (list): list of Microstate objects ([MS.Microstate,..]).
-        by (str, None): Sort key name, one of "energy" or "count", case insensitive.
+        sort_by (str, "energy"): Sort key name, one of "energy" or "count", case insensitive.
         reverse (bool, False): Argument for `sorted` function.
     """
 
-    if by is None:
-        raise ValueError("Argument `by` is required; one of ['energy', 'count'].")
+    if not sort_by or sort_by is None:
+        raise ValueError("Argument `sort_by` is required; one of ['energy', 'count'].")
 
-    by = by.lower()
+    sort_by = sort_by.lower()
     if by not in ["energy", "count"]:
-        raise ValueError(f"Values for `by` are 'energy' or 'count'; Given: {by}")
+        raise ValueError(f"Values for `sort_by` are 'energy' or 'count'; Given: {by}")
+
     idx = 0
-    if by == "count":
+    if sort_by == "count":
         idx = 1
     ms_values = [[m.E, m.count, m.state] for m in ms_list]
 
     return sorted(ms_values, key=lambda x: x[idx], reverse=reverse)
 
 
+# def sample_microstates(size: int, ms_list: list, kind: str = "deterministic",
 def sample_microstates(
-    size: int, sorted_ms_list: list, kind: str = "deterministic"
+    ms: MS,
+    size: int,
+    kind: str = "deterministic",
+    sort_by: str = None,
+    reverse: bool = False,
 ) -> tuple:
     """
-    Implement a sampling of the microstates in sorted_ms_list depending on `kind`.
+    Implement a sampling of MS.microstates depending on `kind`.
     Args:
+        ms (MS): An instance of the MS class.
         size (int): sample size
-        sorted_ms_list (list): sorted [MS.Microstate,..]
         kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
-            If 'deterministic', the microstates in sorted_ms_list are sampled at regular intervals,
-            else, the sampling is random. Case insensitive.
+            If 'deterministic', the microstates in ms_list are sorted then sampled at
+            regular intervals otherwise, the sampling is random. Case insensitive.
+        sort_by (str, "energy"): Only applies if kind is "deterministic".
+        reverse (bool, False): Only applies if kind is "deterministic".
     Returns:
-        tuple: cumsum of ms.count in sorted_ms_list, array of indices for selection
+        A 3-tuple: cumsum of MC.count in ms.microstates,
+                   array of indices for selection,
+                   ms_list?
     """
 
     kind = kind.lower()
@@ -354,13 +369,21 @@ def sample_microstates(
         raise ValueError(
             f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
         )
+    if kind == "deterministic":
+        if sort_by is None:
+            sort_by = "E"
+        ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
+    else:
+        ms_list = ms.microstates
 
     n_counts = 0.0
     ms_count_values = []
 
-    for ms in sorted_ms_list:
-        n_counts += ms[1]
-        ms_count_values.append(ms[1])
+    for mc in ms_list:
+        # n_counts += ms[1]
+        # ms_count_values.append(ms[1])
+        n_counts += mc.count
+        ms_count_values.append(mc.count)
 
     ms_cumsum = np.cumsum(ms_count_values)
 
@@ -373,6 +396,264 @@ def sample_microstates(
         count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
 
     return ms_cumsum, count_selection
+
+
+# ... classes .................................................................
+class Conformer:
+    def __init__(self):
+        self.iconf = 0
+        self.confid = ""
+        self.resid = ""
+        self.crg = 0.0
+
+    def load_from_head3lst(self, line):
+        fields = line.split()
+        self.iconf = int(fields[0]) - 1
+        self.confid = fields[1]
+        self.resid = self.confid[:3] + self.confid[5:11]
+        self.crg = float(fields[4])
+
+
+class Microstate:
+    """Sortable class for microstates."""
+
+    def __init__(self, state, E, count):
+        self.stateid = zlib.compress(" ".join([str(x) for x in state]).encode())
+        self.E = E
+        self.count = count
+
+    def state(self):
+        return [int(i) for i in zlib.decompress(self.stateid).decode().split()]
+
+    def _check_operand(self, other):
+        """Fails on missing attribute."""
+
+        if not (
+            hasattr(other, "stateid")
+            and hasattr(other, "E")
+            and hasattr(other, "count")
+        ):
+            return NotImplemented("Comparison with non Microstate object.")
+        return
+
+    def __eq__(self, other):
+        self._check_operand(other)
+        return (self.stateid, self.E, self.count) == (
+            other.stateid,
+            other.E,
+            other.count,
+        )
+
+    def __lt__(self, other):
+        self._check_operand(other)
+        return (self.stateid, self.E, self.count) < (
+            other.stateid,
+            other.E,
+            other.count,
+        )
+
+
+class MS:
+    """Uses split ms_out files."""
+
+    def __init__(
+        self,
+        mcce_output_path: str,
+        pH: Union[int, float],
+        Eh: Union[int, float],
+        selected_MC: int = 0,
+        overwrite_split_files: bool = False,
+    ):
+        """MS.init
+
+        Parameters:
+            mcce_output_path (str): A MCCE simulation output folder.
+            pH (int or float): A pH point.
+            Eh (int or float): A Eh point.
+            selected_MC (int, 0): The index of an MC run; one of `range(constants.MONTERUNS)`.
+            overwrite_split_files (bool, False): whether to redo the splitting of msout_file.
+        """
+
+        self.mcce_out = Path(mcce_output_path)
+        self.selected_MC = selected_MC
+        self.MC_runs = None
+        self.overwrite_split_files = overwrite_split_files
+        self.T = ROOMT
+        self.pH = pH
+        self.Eh = Eh
+        self.method = ""
+        self.conformers = []
+        self.iconf_by_confname = {}
+        self.fixed_iconfs = []
+        self.fixed_residue_names = []
+        self.fixed_crg = 0.0
+        self.fixed_ne = 0.0
+        self.fixed_nh = 0.0
+        self.free_residues = []  # free residues, referred by conformer indices
+        self.free_residue_names = []
+        self.ires_by_iconf = {}  # index of free residue by index of conf
+        self.microstates = []  # list of microstates
+
+        # new: comes from run.prm.record = MONTE_FLIPS x MONTE_NITER
+        self.counts = None  # set by _get_runprm_data()
+
+        self._get_runprm_data()
+        self.fname = get_msout_filename(self.mcce_out, self.pH, self.Eh)
+        self.msout_file_dir, created = mkdir_from_msout_file(self.fname)
+        if created:
+            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
+        elif self.overwrite_split_files:
+            clear_folder(self.msout_file_dir)
+            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
+
+        self._get_conformer_data()
+        self._get_header_data()
+        self._get_mc_data()
+        check_msout_split(self.msout_file_dir, self.MC_runs)
+
+    def __repr__(self):
+        return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, selected_MC={self.selected_MC}, overwrite_split_files={self.overwrite_split_files})"""
+
+    def _get_runprm_data(self):
+        """Populate class vars: T, MC_runs."""
+        runprm = self.mcce_out.joinpath("run.prm.record")
+        check_path(runprm)
+
+        cmd1 = subprocess.check_output(
+            f"grep 'MONTE_T)$' {runprm}| " + """awk '{printf "%.2f", $1}'""",
+            stderr=subprocess.STDOUT,
+            shell=True,
+        ).decode()
+        self.T = float(cmd1)
+
+        cmd2 = subprocess.check_output(
+            f"grep MONTE_RUNS {runprm} | " + """awk '{printf "%d", $1}'""",
+            stderr=subprocess.STDOUT,
+            shell=True,
+        ).decode()
+        self.MC_runs = int(cmd2)
+        # MONTE_FLIPS x MONTE_NITER
+        return
+
+    def _get_conformer_data(self):
+        """Populate class vars: conformers, iconf_by_confname."""
+        head3_path = self.mcce_out.joinpath("head3.lst")
+        check_path(head3_path)
+        self.conformers, self.iconf_by_confname = read_conformers(head3_path)
+
+        return
+
+    def _get_header_data(self):
+        """Populate class vars: T, pH, Eh, method, fixed_iconfs, free_residues,
+        free_residue_names, and ires_by_iconf from the header of the split msout file.
+        """
+
+        steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
+
+        header_file = self.msout_file_dir.joinpath("header")
+        with open(header_file) as fh:
+            for nl, line in enumerate(fh):
+                if not steps_done["exper"]:
+                    fields = line.split(",")
+                    for field in fields:
+                        parts = field.split(":")
+                        key = parts[0].upper().strip()
+                        value = float(parts[1])
+                        if key == "T":
+                            self.T = value
+                        elif key == "PH":
+                            self.pH = value
+                        elif key == "EH":
+                            self.Eh = value
+                        else:
+                            raise ValueError(
+                                f"Unrecognized experimental condition part: {key}"
+                            )
+                    steps_done["exper"] = True
+                    continue
+
+                if not steps_done["method"]:
+                    _, value = line.split(":")
+                    self.method = value.strip()
+                    steps_done["method"] = True
+                    continue
+
+                if not steps_done["fixed"]:
+                    _, fields = line.split(":")
+                    self.fixed_iconfs = [int(x) for x in fields.strip("\n").split()]
+                    self.fixed_residue_names = [
+                        self.conformers[fc].resid for fc in self.fixed_iconfs
+                    ]
+                    steps_done["fixed"] = True
+                    continue
+
+                if not steps_done["free"]:
+                    n_res, fres = line.split(":")
+                    self.free_residues = [
+                        [int(n) for n in grp.strip().split()]
+                        for grp in fres.strip(" ;\n").split(";")
+                    ]
+                    if len(self.free_residues) != int(n_res):
+                        msg = "Mismatch between the number of free residues indicator"
+                        msg = (
+                            msg
+                            + " and the number of residues listed on the same line.\n"
+                        )
+                        raise ValueError(msg + f"\t{line}")
+
+                    self.free_residue_names = [
+                        self.conformers[g[0]].resid for g in self.free_residues
+                    ]
+                    for ires, res in enumerate(self.free_residues):
+                        for iconf in res:
+                            self.ires_by_iconf[iconf] = ires
+                    steps_done["fee"] = True
+
+        return
+
+    def _get_mc_data(self):
+        """Populate class vars microstates with the data from a MC file identified
+        in `self.selected_MC`.
+        """
+
+        microstates_by_id = {}
+
+        MC_file = self.msout_file_dir.joinpath(f"MC{self.selected_MC}")
+        with open(MC_file) as fh:
+            for nl, line in enumerate(fh):
+                line = line.strip()
+
+                if nl == 0:
+                    _, confs = line.split(":")
+                    current_state = [int(c) for c in confs.split()]
+                    if not current_state:
+                        msg = "The current ms state line cannot be empty.\n"
+                        msg = msg + f"\tProblem line in {MC_file}: {nl}"
+                        raise ValueError(msg)
+                    continue
+
+                fields = line.split(",")
+                if len(fields) >= 3:
+                    state_e = float(fields[0])
+                    count = int(fields[1])
+                    # flipped confs:
+                    for ic in [int(c) for c in fields[2].split()]:
+                        current_state[self.ires_by_iconf[ic]] = ic
+
+                    ms = Microstate(current_state, state_e, count)
+
+                    if ms.stateid in microstates_by_id.keys():
+                        microstates_by_id[ms.stateid].count += ms.count
+                    else:
+                        microstates_by_id[ms.stateid] = ms
+                    self.counts += ms.count
+
+        self.microstates = list(microstates_by_id.values())
+
+        return
+
+    def sort_microstates(self, by: str = "E", reverse: bool = False):
+        return sorted(self.microstates, key=operator.attrgetter(by), reverse=reverse)
 
 
 def get_selected_confs(ms: MS, selected_ms):
@@ -470,6 +751,7 @@ def ms_to_pdb(
         with open(file_name, "w") as output_pdb:
             output_pdb.write(remark_data)
             for line in pdb:
+                # TODO check if res is cofactor ->
                 confID = line[17:20] + line[80:82] + line[21:26] + sep + line[27:30]
                 if confID[3:5] == "BK":
                     output_pdb.write(line)
@@ -498,11 +780,13 @@ def pdbs_from_ms_samples(
         mcce_dir (str): MCCE simulation output folder.
         n_sample_size (int): How many microstates, hence pdb files to create.
         sample_kind (str, "deterministic"): Kind of sampling; either regularly spaced
-                   or random.
+            or random.
         ms_sort_by (str): Either 'energy' or 'count' (case insensitive).
+            Only applies if `sample_kind` is "deterministic".
         ms_sort_reverse (bool, False): If True, descending order.
-        output_dir (str, None): Output folder path;
-                 Folder "output_dir/pdbs_from_ms" will be created if necessary.
+            Only applies if `sample_kind` is "deterministic".
+        output_dir (str, None): Output folder path. Folder "output_dir/pdbs_from_ms"
+            will be created if necessary.
         clear_pdbs_folder (bool, False): Whether to delete existing pdb files.
         list_files (bool, False): Whether to list output folder contents.
     """
@@ -511,6 +795,8 @@ def pdbs_from_ms_samples(
         raise ValueError(
             f"Values for `ms_sort_by` are 'energy' or 'count'; Given: {ms_sort_by}"
         )
+    if ms_sort_by == "energy":
+        ms_sort_by = "E"
 
     mcce_dir = Path(mcce_dir)
     step2_path = mcce_dir.joinpath("step2_out.pdb")
@@ -525,11 +811,11 @@ def pdbs_from_ms_samples(
     elif clear_pdbs_folder:
         clear_folder(pdb_out_folder)
 
-    mc_run = ms.selected_MC  # part of pdb name
-    sorted_ms_list = sort_microstate_list(
-        ms.microstates, by=ms_sort_by, reverse=ms_sort_reverse
-    )
-    ms_cumsum, count_selection = sample_microstates(n_sample_size, sorted_ms_list)
+    # sorted_ms_list = sort_microstate_list(
+    #    ms.microstates, by=ms_sort_by, reverse=ms_sort_reverse)
+
+    # ms_cumsum, count_selection, ms_sampled = sample_microstates(n_sample_size, ms.microstates)
+    ms_cumsum, count_selection, ms_sampled = sample_microstates(n_sample_size, ms)
 
     # Summarize what's being done:
     print(
@@ -537,6 +823,7 @@ def pdbs_from_ms_samples(
         "NOTE: the output pdb will be free of any water molecules in step2_out.pdb.",
     )
 
+    mc_run = ms.selected_MC  # part of pdb name
     for c in count_selection:
         ms_index = np.where((ms_cumsum - c) > 0)[0][0]
         ms_selection = sorted_ms_list[ms_index]
@@ -559,320 +846,103 @@ def pdbs_from_ms_samples(
     return
 
 
-# ... classes .................................................................
-
-
-class Conformer:
-    def __init__(self):
-        self.iconf = 0
-        self.confid = ""
-        self.resid = ""
-        self.crg = 0.0
-
-    def load_from_head3lst(self, line):
-        fields = line.split()
-        self.iconf = int(fields[0]) - 1
-        self.confid = fields[1]
-        self.resid = self.confid[:3] + self.confid[5:11]
-        self.crg = float(fields[4])
-
-
-class Microstate:
-    def __init__(self, state, E, count):
-        self.stateid = zlib.compress(" ".join([str(x) for x in state]).encode())
-        self.E = E
-        self.count = count
-
-    def state(self):
-        return [int(i) for i in zlib.decompress(self.stateid).decode().split()]
-
-
-class MS:
-    """Uses split ms_out files."""
-
-    def __init__(
-        self,
-        mcce_output_path: str,
-        pH: Union[int, float],
-        Eh: Union[int, float],
-        selected_MC: int = 0,
-        overwrite_split_files: bool = False,
-    ):
-        """MS.init
-
-        Parameters:
-            mcce_output_path (str): A MCCE simulation output folder.
-            pH (int or float): A pH point.
-            Eh (int or float): A Eh point.
-            selected_MC (int, 0): The index of an MC run; one of `range(constants.MONTERUNS)`.
-            overwrite_split_files (bool, False): whether to redo the splitting of msout_file.
-        """
-
-        self.mcce_out = Path(mcce_output_path)
-        self.selected_MC = selected_MC
-        self.MC_runs = None
-        self.overwrite_split_files = overwrite_split_files
-        self.T = ROOMT
-        self.pH = pH
-        self.Eh = Eh
-        self.method = ""
-        self.conformers = []
-        self.iconf_by_confname = {}
-        self.fixed_iconfs = []
-        self.fixed_residue_names = []
-        self.fixed_crg = 0.0
-        self.fixed_ne = 0.0
-        self.fixed_nh = 0.0
-        self.free_residues = []  # free residues, referred by conformer indices
-        self.free_residue_names = []
-        self.ires_by_iconf = {}  # index of free residue by index of conf
-        self.microstates = {}  # a dict of microstates
-        self.counts = 0  # number of Monte Carlo steps:: redundant: already in run.prm
-
-        self._get_runprm_data()
-        self.fname = get_msout_filename(self.mcce_out, self.pH, self.Eh)
-        self.msout_file_dir, created = mkdir_from_msout_file(self.fname)
-        if created:
-            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
-        elif self.overwrite_split_files:
-            clear_folder(self.msout_file_dir)
-            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
-
-        self._get_conformer_data()
-        self._get_header_data()
-        self._get_mc_data()
-        check_msout_split(self.msout_file_dir, self.MC_runs)
-
-    def __repr__(self):
-        return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, selected_MC={self.selected_MC}, overwrite_split_files={self.overwrite_split_files})"""
-
-    def _get_runprm_data(self):
-        """Populate class vars: T, MC_runs."""
-        runprm = self.mcce_out.joinpath("run.prm.record")
-        check_path(runprm)
-
-        cmd1 = f"grep 'MONTE_T)$' {runprm}| " + "awk '{print $1}'"
-        self.T = subprocess.check_output(cmd1, stderr=subprocess.STDOUT, shell=True)
-        cmd2 = f"grep MONTE_RUNS {runprm} | " + "awk '{print $1}'"
-        self.MC_runs = subprocess.check_output(
-            cmd2, stderr=subprocess.STDOUT, shell=True
-        )
-
-        return
-
-    def _get_conformer_data(self):
-        """Populate class vars: conformers, iconf_by_confname."""
-        head3_path = self.mcce_out.joinpath("head3.lst")
-        check_path(head3_path)
-        self.conformers, self.iconf_by_confname = read_conformers(head3_path)
-
-        return
-
-    def _get_header_data(self):
-        """Populate class vars: T, pH, Eh, method, fixed_iconfs, free_residues,
-        free_residue_names, and ires_by_iconf from the header of the split msout file.
-        """
-
-        steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
-
-        header_file = self.msout_file_dir.joinpath("header")
-        with open(header_file) as fh:
-            for nl, line in enumerate(fh):
-                if not steps_done["exper"]:
-                    fields = line.split(",")
-                    for field in fields:
-                        parts = field.split(":")
-                        key = parts[0].upper().strip()
-                        value = float(parts[1])
-                        if key == "T":
-                            self.T = value
-                        elif key == "PH":
-                            self.pH = value
-                        elif key == "EH":
-                            self.Eh = value
-                        else:
-                            raise ValueError(
-                                f"Unrecognized experimental condition part: {key}"
-                            )
-                    steps_done["exper"] = True
-                    continue
-
-                if not steps_done["method"]:
-                    _, value = line.split(":")
-                    self.method = value.strip()
-                    steps_done["method"] = True
-                    continue
-
-                if not steps_done["fixed"]:
-                    _, fields = line.split(":")
-                    self.fixed_iconfs = [int(x) for x in fields.strip("\n").split()]
-                    self.fixed_residue_names = [
-                        self.conformers[fc].resid for fc in self.fixed_iconfs
-                    ]
-                    steps_done["fixed"] = True
-                    continue
-
-                if not steps_done["free"]:
-                    n_res, fres = line.split(":")
-                    self.free_residues = [
-                        [int(n) for n in grp.strip().split()]
-                        for grp in fres.strip(" ;\n").split(";")
-                    ]
-                    if len(self.free_residues) != int(n_res):
-                        msg = "Mismatch between the number of free residues indicator"
-                        msg = (
-                            msg
-                            + " and the number of residues listed on the same line.\n"
-                        )
-                        raise ValueError(msg + f"\t{line}")
-
-                    self.free_residue_names = [
-                        self.conformers[g[0]].resid for g in self.free_residues
-                    ]
-                    for ires, res in enumerate(self.free_residues):
-                        for iconf in res:
-                            self.ires_by_iconf[iconf] = ires
-                    steps_done["fee"] = True
-
-        return
-
-    def _get_mc_data(self):
-        """Populate class vars microstates with the data in a MC file identified
-        in `self.selected_MC`.
-        """
-
-        microstates_by_id = {}
-
-        MC_file = self.msout_file_dir.joinpath(f"MC{self.selected_MC}")
-        with open(MC_file) as fh:
-            for nl, line in enumerate(fh):
-                line = line.strip()
-
-                if nl == 0:
-                    _, confs = line.split(":")
-                    current_state = [int(c) for c in confs.split()]
-                    if not current_state:
-                        msg = "The current ms state line cannot be empty.\n"
-                        msg = msg + f"\tProblem line in {MC_file}: {nl}"
-                        raise ValueError(msg)
-                    continue
-
-                fields = line.split(",")
-                if len(fields) >= 3:
-                    state_e = float(fields[0])
-                    count = int(fields[1])
-                    # flipped confs:
-                    for ic in [int(c) for c in fields[2].split()]:
-                        current_state[self.ires_by_iconf[ic]] = ic
-
-                    ms = Microstate(current_state, state_e, count)
-
-                    if ms.stateid in microstates_by_id.keys():
-                        microstates_by_id[ms.stateid].count += ms.count
-                    else:
-                        microstates_by_id[ms.stateid] = ms
-                    self.counts += ms.count
-
-        self.microstates = list(microstates_by_id.values())
-
-        return
-
-
 # ... cli ....................................................................
 def generate_parser():
+    def arg_int_or_float(x):
+        """Replaces typing with Union[int, float] does not work in argparse."""
+        x = float(x)
+        if x.is_integer():
+            return int(x)
+        else:
+            return x
+
     p = ArgumentParser(
         prog=__name__,
+        # "ms_sampling_to_pdbs",
         description=__doc__,
         usage=USAGE,
-        formatter_class=ArgumentDefaultsHelpFormatter,
-        exit_on_error=True,
+        formatter_class=RawDescriptionHelpFormatter,
+        epilog=">>> END of %(prog)s.",
     )
 
     p.add_argument(
-        "-mcce_dir",
+        "--mcce_dir",
         type=str,
         required=True,
-        help="The folder with files from a MCCE simulation (MCCE executable not required).",
+        help="The folder with files from a MCCE simulation; required.",
     )
     p.add_argument(
-        "-pH",
-        type=Union[int, float],
+        "--pH",
+        type=arg_int_or_float,
         required=True,
-        help="The pH point; part of experiemntal variables defining a microstate.",
+        help="The pH point; part of experiemntal variables defining a microstate; required.",
     )
     p.add_argument(
-        "-Eh",
-        type=Union[int, float],
+        "--Eh",
+        type=arg_int_or_float,
         required=True,
-        help="The Eh point; part of experiemntal variables defining a microstate.",
+        help="The Eh point; part of experiemntal variables defining a microstate; required.",
     )
     p.add_argument(
         "-MC",
         type=int,
         default=0,
-        show_default=True,
-        help="The (zero-based) index of the MONTERUNS to use.",
+        help="The (zero-based) index of the MONTERUNS to use; default: %(default)s.",
     )
     p.add_argument(
         "-overwrite_split_files",
-        type=bool,
         default=False,
-        show_default=True,
-        help="The MS class uses a split msout file (header and MCi files); if True the file will be split anew.",
+        action="store_false",
+        # help='the bar to %(prog)s (default: %(default)s)'
+        help="The MS class uses a split msout file (header and MCi files); if True the file will be split anew; default: %(default)s.",
     )
     p.add_argument(
-        "-sample_size",
+        "--sample_size",
         type=int,
         required=True,
-        help="The size of the microstates sample, hence the number of pdb files to write.",
+        help="The size of the microstates sample, hence the number of pdb files to write; required",
     )
     p.add_argument(
         "-sample_kind",
         type=str,
         choices=["d", "deterministic", "r", "random"],
         default="d",
-        show_default=True,
         help="""The sampling kind: 'deterministic': regularly spaced samples,
-        'random': randomly chosen.""",
+        'random': random indices over the microstates space chosen; default: %(default)s.""",
     )
     p.add_argument(
         "-sort_by",
         type=str,
         choices=["energy", "count"],
         default="energy",
-        show_default=True,
         help="""The name referencing the Conformer variable to use when sorting:
-        'energy'-> Conf.E, 'count': Conf.count.""",
+        'energy'-> Conf.E, 'count': Conf.count; default: %(default)s.""",
     )
     p.add_argument(
         "-reverse_sort",
-        type=bool,
         default=False,
-        show_default=True,
-        help="""The sort order: False : ascendingly (default), True : descendingly.""",
+        action="store_false",
+        help="The sort order: False : ascendingly, True : descendingly; default: %(default)s.",
     )
     p.add_argument(
         "-output_dir",
         type=str,
         default=None,
-        show_default=True,
-        help="""The path of the folder recieving the created pdb files. If not provided, the path
+        help="""The path of the folder receiving the created pdb files. If not provided, the path
         defaults to mcce_dir/ms_out/msout_file_dir/pdbs_from_ms, otherwise he actual output folder
-        will be: output_dir/pdbs_from_ms""",
+        will be: output_dir/pdbs_from_ms; default: %(default)s.""",
     )
     p.add_argument(
         "-clear_pdbs_folder",
-        type=bool,
         default=False,
-        show_default=True,
-        help="Whether to clear an existing pdbs folder.",
+        action="store_false",
+        help="Whether to clear an existing pdbs folder; default: %(default)s.",
     )
     p.add_argument(
         "-list_files",
-        type=bool,
         default=False,
-        show_default=True,
-        help="Whether to list the pdb files created.",
+        action="store_false",
+        help="Whether to list the pdb files created; default: %(default)s.",
     )
 
     return p
@@ -881,7 +951,10 @@ def generate_parser():
 def main(argv=None):
     cli_parser = generate_parser()
     args = cli_parser.parse_args(argv)
-    args = args or ["--help"]
+    print(type(args))
+    if args is None:
+        cli_parser.print_help()
+        return 0
 
     mcce_dir = Path(args.mcce_dir)
     check_path(mcce_dir)
@@ -915,4 +988,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))
