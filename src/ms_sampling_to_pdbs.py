@@ -12,7 +12,7 @@ PRE-REQUISITES:
    folders or files (required):
      MCCE output:        Info extracted:
      ...................................
-    o run.prm.record     MONTE_T and MONTE_RUNS
+    o run.prm.record     STEP$, MONTE_T and MONTE_RUNS
     o step2_out.pdb      Coordinates
     o head3.lst          Conformer index and id, e.g. 00017, GLU-1A0007_005
     o ms_out/            Microstates data from "msout files", e.g. ms_out/pH5eH0ms.txt
@@ -32,6 +32,7 @@ Minimal number of arguments: --mcce_dir, --pH, --Eh, --sample_size
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import datetime
+from functools import lru_cache
 import numpy as np
 import operator
 from pathlib import Path
@@ -72,7 +73,7 @@ def get_msout_filename(
     ms_file = f"pH{pH:.{prec_ph}f}eH{Eh:.{prec_eh}f}ms.txt"
     fname = msout_dir.joinpath(ms_file)
     if not fname.exists():
-        raise FileNotFound(f"File {fname} not found in {msout_dir}")
+        raise FileNotFoundError(f"File {fname} not found in {msout_dir}")
 
     return fname
 
@@ -133,7 +134,7 @@ def check_dir_noerr(dir_path) -> bool:
     return True
 
 
-def check_path(filepath: str) -> None:
+def check_path(filepath: str, raise_err=True) -> None:
     """
     Returns:
         None if 'all clear', else error if either the parent folder
@@ -142,16 +143,21 @@ def check_path(filepath: str) -> None:
 
     p = Path(filepath)
     if not p.exists():
-        raise FileNotFoundError(f"Path not found: {p}")
-
-    return
+        if raise_err:
+            raise FileNotFoundError(f"Path not found: {p}")
+        else:
+            return False
+    if raise_err:
+        return
+    else:
+        return True
 
 
 def check_msout_split(msout_file_dir: Path, runprm_mcruns: int) -> bool:
     """Return True if the header and the MCi files exist."""
     b = msout_file_dir.joinpath("header").exists()
     if not b:
-        print(f"Split file (header) not found.")
+        # print(f"Split file (header) not found.")
         return False
     for i in range(runprm_mcruns):
         b = b and msout_file_dir.joinpath(f"MC{i}").exists()
@@ -185,9 +191,7 @@ def read_conformers(head_3_path: str) -> tuple:
     return conformers, iconf_by_confname
 
 
-def split_msout_file(
-    msout_fname: str, pH: float, Eh: float, MC_runs: int, overwrite: bool = False
-):
+def split_msout_file(msout_fname: str, MC_RUNS: int, overwrite: bool = False):
     """Split the msout file into a "header" portion (preceeding MC:0 line) and MCi files
     for the MC records in a folder created with the name of the msout_file as per arguments.
     Note: Each file created is free of comments or blank lines.
@@ -195,14 +199,14 @@ def split_msout_file(
 
     msout_file_dir, created = mkdir_from_msout_file(msout_fname)
 
-    if check_msout_split(msout_file_dir, MC_runs) and not overwrite:
+    if check_msout_split(msout_file_dir, MC_RUNS) and not overwrite:
         print(
             "The ms_out file is already split into header and MCi files. Set `overwrite` to True to replace them."
         )
         return
 
     steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
-    MC_done = dict((i, False) for i in range(MC_runs))
+    MC_done = dict((i, False) for i in range(MC_RUNS))
 
     header_file = msout_file_dir.joinpath("header")
     header = open(header_file, "w")
@@ -212,7 +216,7 @@ def split_msout_file(
         p = msout_file_dir.joinpath(f"MC{k}")
         globals()[f"MC{k}"] = open(p, "w")
 
-    with open(fname) as fh:
+    with open(msout_fname) as fh:
         for nl, line in enumerate(fh):
             line = line.strip()
             if not line:
@@ -340,64 +344,6 @@ def sort_microstate_list0(
     return sorted(ms_values, key=lambda x: x[idx], reverse=reverse)
 
 
-# def sample_microstates(size: int, ms_list: list, kind: str = "deterministic",
-def sample_microstates(
-    ms: MS,
-    size: int,
-    kind: str = "deterministic",
-    sort_by: str = None,
-    reverse: bool = False,
-) -> tuple:
-    """
-    Implement a sampling of MS.microstates depending on `kind`.
-    Args:
-        ms (MS): An instance of the MS class.
-        size (int): sample size
-        kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
-            If 'deterministic', the microstates in ms_list are sorted then sampled at
-            regular intervals otherwise, the sampling is random. Case insensitive.
-        sort_by (str, "energy"): Only applies if kind is "deterministic".
-        reverse (bool, False): Only applies if kind is "deterministic".
-    Returns:
-        A 3-tuple: cumsum of MC.count in ms.microstates,
-                   array of indices for selection,
-                   ms_list?
-    """
-
-    kind = kind.lower()
-    if kind not in ["deterministic", "random"]:
-        raise ValueError(
-            f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
-        )
-    if kind == "deterministic":
-        if sort_by is None:
-            sort_by = "E"
-        ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
-    else:
-        ms_list = ms.microstates
-
-    n_counts = 0.0
-    ms_count_values = []
-
-    for mc in ms_list:
-        # n_counts += ms[1]
-        # ms_count_values.append(ms[1])
-        n_counts += mc.count
-        ms_count_values.append(mc.count)
-
-    ms_cumsum = np.cumsum(ms_count_values)
-
-    if kind == "deterministic":
-        X = n_counts - size
-        Y = n_counts / size
-        count_selection = np.arange(size, X, Y)
-    else:
-        rng = np.random.default_rng()
-        count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
-
-    return ms_cumsum, count_selection
-
-
 # ... classes .................................................................
 class Conformer:
     def __init__(self):
@@ -475,15 +421,32 @@ class MS:
         """
 
         self.mcce_out = Path(mcce_output_path)
-        self.selected_MC = selected_MC
-        self.MC_runs = None
-        self.overwrite_split_files = overwrite_split_files
-        self.T = ROOMT
         self.pH = pH
         self.Eh = Eh
-        self.method = ""
+        self._selected_MC = selected_MC
+        self.overwrite_split_files = overwrite_split_files
+
+        self.T = None
+        self.MC_RUNS = None
+        self.MC_NITER = None
+        self._get_runprm_data()
+
         self.conformers = []
         self.iconf_by_confname = {}
+        self._get_conformer_data()
+
+        self.fname = get_msout_filename(self.mcce_out, self.pH, self.Eh)
+        self.msout_fpath = self.mcce_out.joinpath(self.fname)
+        print("msout_fpath:", self.msout_fpath)
+        self.msout_file_dir, created = mkdir_from_msout_file(self.fname)
+        print("msout_file_dir, created:", created, self.msout_file_dir)
+        if created:
+            split_msout_file(self.msout_fpath, self.MC_RUNS)
+        elif self.overwrite_split_files:
+            clear_folder(self.msout_file_dir)
+            split_msout_file(self.msout_fpath, self.MC_RUNS, overwrite=True)
+
+        self.method = ""
         self.fixed_iconfs = []
         self.fixed_residue_names = []
         self.fixed_crg = 0.0
@@ -492,51 +455,66 @@ class MS:
         self.free_residues = []  # free residues, referred by conformer indices
         self.free_residue_names = []
         self.ires_by_iconf = {}  # index of free residue by index of conf
-        self.microstates = []  # list of microstates
-
-        # new: comes from run.prm.record = MONTE_FLIPS x MONTE_NITER
-        self.counts = None  # set by _get_runprm_data()
-
-        self._get_runprm_data()
-        self.fname = get_msout_filename(self.mcce_out, self.pH, self.Eh)
-        self.msout_file_dir, created = mkdir_from_msout_file(self.fname)
-        if created:
-            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
-        elif self.overwrite_split_files:
-            clear_folder(self.msout_file_dir)
-            split_msout_file(self.mcce_out, self.pH, self.Eh, self.MC_runs)
-
-        self._get_conformer_data()
         self._get_header_data()
-        self._get_mc_data()
-        check_msout_split(self.msout_file_dir, self.MC_runs)
+
+        self.microstates = []  # list of microstates
+        self.counts = 0
+        self.get_mc_data(self.selected_MC)
+
+        check_msout_split(self.msout_file_dir, self.MC_RUNS)
 
     def __repr__(self):
         return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, selected_MC={self.selected_MC}, overwrite_split_files={self.overwrite_split_files})"""
 
+    @property
+    def selected_MC(self):
+        return self._selected_MC
+
+    @selected_MC.setter
+    def selected_MC(self, value):
+        if self.T is None:
+            # init
+            what = MONTE_RUNS
+        else:
+            what = self.MC_RUNS
+        if value >= what:
+            print(
+                f"This value is beyond the range of MONTE_RUNS({RUNS}) used in this simulation: {value}."
+            )
+        else:
+            self._selected_MC = value
+
+    def __eq__(self, other):
+        return self.selected_MC == other.selected_MC
+
+    def __hash__(self):
+        return hash(self.selected_MC)
+
     def _get_runprm_data(self):
-        """Populate class vars: T, MC_runs."""
+        """Populate class vars: T, MC_RUNS, MC_NITER."""
+        print("Getting runprm data.")
         runprm = self.mcce_out.joinpath("run.prm.record")
         check_path(runprm)
 
-        cmd1 = subprocess.check_output(
-            f"grep 'MONTE_T)$' {runprm}| " + """awk '{printf "%.2f", $1}'""",
-            stderr=subprocess.STDOUT,
-            shell=True,
-        ).decode()
-        self.T = float(cmd1)
+        prmdata = (
+            subprocess.check_output(
+                f"grep -E 'MONTE_T)|MONTE_RUNS|MONTE_NITER' {runprm} | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
+                stderr=subprocess.STDOUT,
+                shell=True,
+            )
+            .decode()
+            .splitlines()
+        )
 
-        cmd2 = subprocess.check_output(
-            f"grep MONTE_RUNS {runprm} | " + """awk '{printf "%d", $1}'""",
-            stderr=subprocess.STDOUT,
-            shell=True,
-        ).decode()
-        self.MC_runs = int(cmd2)
-        # MONTE_FLIPS x MONTE_NITER
+        self.T = float(prmdata[0].split()[0])
+        self.MC_RUNS = int(prmdata[1].split()[0])
+        self.MC_NITER = int(prmdata[2].split()[0])
+
         return
 
     def _get_conformer_data(self):
         """Populate class vars: conformers, iconf_by_confname."""
+        print("Getting conformers data.")
         head3_path = self.mcce_out.joinpath("head3.lst")
         check_path(head3_path)
         self.conformers, self.iconf_by_confname = read_conformers(head3_path)
@@ -547,7 +525,7 @@ class MS:
         """Populate class vars: T, pH, Eh, method, fixed_iconfs, free_residues,
         free_residue_names, and ires_by_iconf from the header of the split msout file.
         """
-
+        print("Getting header data.")
         steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
 
         header_file = self.msout_file_dir.joinpath("header")
@@ -611,10 +589,14 @@ class MS:
 
         return
 
-    def _get_mc_data(self):
+    @lru_cache(maxsize=None)
+    def get_mc_data(self, MC: int):
         """Populate class vars microstates with the data from a MC file identified
         in `self.selected_MC`.
         """
+        print("Getting MC data for:", MC)
+        if MC != self.selected_MC:
+            self.selected_MC = MC
 
         microstates_by_id = {}
 
@@ -641,19 +623,92 @@ class MS:
                         current_state[self.ires_by_iconf[ic]] = ic
 
                     ms = Microstate(current_state, state_e, count)
-
                     if ms.stateid in microstates_by_id.keys():
-                        microstates_by_id[ms.stateid].count += ms.count
+                        microstates_by_id[ms.stateid].count += count
                     else:
                         microstates_by_id[ms.stateid] = ms
-                    self.counts += ms.count
+                    self.counts += count
 
         self.microstates = list(microstates_by_id.values())
 
         return
 
     def sort_microstates(self, by: str = "E", reverse: bool = False):
+        """Return a sorted copy of MS.microstates."""
+        by = by.lower()
+        if by not in ["energy", "count"]:
+            raise ValueError(f"Values for `by` are 'energy' or 'count'; Given: {by}")
+        if by[0] == "e":
+            by = "E"
         return sorted(self.microstates, key=operator.attrgetter(by), reverse=reverse)
+
+    def verify_counts(self):
+        """Verify that the microstates counts iteratively added in MS.counts
+        equal RUNS * len(ms.conformers) * NITER.
+        """
+
+        ms_calc = self.MC_RUNS * len(self.conformers) * self.MC_NITER
+        if ms_calc != self.counts:
+            print(
+                f"Unexpected microstates count: {self.counts = :,}, should be: {ms_calc:,}"
+            )
+
+        return
+
+
+def sample_microstates(
+    ms: MS,
+    size: int,
+    kind: str = "deterministic",
+    sort_by: str = "energy",
+    reverse: bool = False,
+) -> tuple:
+    """
+    Implement a sampling of MS.microstates depending on `kind`.
+    Args:
+        ms (MS): An instance of the MS class.
+        size (int): sample size
+        kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
+            If 'deterministic', the microstates in ms_list are sorted then sampled at
+            regular intervals otherwise, the sampling is random. Case insensitive.
+        sort_by (str, "energy"): Only applies if kind is "deterministic".
+        reverse (bool, False): Only applies if kind is "deterministic".
+    Returns:
+        A 3-tuple: cumsum of MC.count in ms.microstates,
+                   array of indices for selection,
+                   ms_list?
+    """
+
+    kind = kind.lower()
+    if kind not in ["deterministic", "random"]:
+        raise ValueError(
+            f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
+        )
+    if kind == "deterministic":
+        if (sort_by is None) or (sort_by == "energy"):
+            sort_by = "E"
+        else:
+            sort_by = sort_by.lower()
+            if sort_by not in ["energy", "count"]:
+                raise ValueError(
+                    f"Values for `sort_by` are 'energy' or 'count'; Given: {by}"
+                )
+
+        ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
+    else:
+        ms_list = ms.microstates
+
+    ms_cumsum = np.cumsum([mc.count for mc in ms_list])
+
+    if kind == "deterministic":
+        X = ms.counts - size
+        Y = ms.counts / size
+        count_selection = np.arange(size, X, Y)
+    else:
+        rng = np.random.default_rng()
+        count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
+
+    return ms_cumsum, count_selection, ms_list
 
 
 def get_selected_confs(ms: MS, selected_ms):
@@ -811,11 +866,9 @@ def pdbs_from_ms_samples(
     elif clear_pdbs_folder:
         clear_folder(pdb_out_folder)
 
-    # sorted_ms_list = sort_microstate_list(
-    #    ms.microstates, by=ms_sort_by, reverse=ms_sort_reverse)
-
-    # ms_cumsum, count_selection, ms_sampled = sample_microstates(n_sample_size, ms.microstates)
-    ms_cumsum, count_selection, ms_sampled = sample_microstates(n_sample_size, ms)
+    ms_cumsum, count_selection, ms_sampled = sample_microstates(
+        ms, n_sample_size, kind=sample_kind, sort_by=ms_sort_by, reverse=ms_sort_reverse
+    )
 
     # Summarize what's being done:
     print(
@@ -826,7 +879,7 @@ def pdbs_from_ms_samples(
     mc_run = ms.selected_MC  # part of pdb name
     for c in count_selection:
         ms_index = np.where((ms_cumsum - c) > 0)[0][0]
-        ms_selection = sorted_ms_list[ms_index]
+        ms_selection = ms_sampled[ms_index]
 
         confs_for_pdb = get_selected_confs(ms, ms_selection)
 
@@ -948,6 +1001,35 @@ def generate_parser():
     return p
 
 
+def check_mcce_dir(mcce_dir):
+    """Check the integrity of the mcce output folder:
+    0. mcce_dir/run.prm.record file exists
+    1. Step4 was run as indicated in run.prm.record
+    2. These also exist: head3.lst, step2_out.pdb, and ms_out folder
+    """
+
+    for f in ["run.prm.record", "head3.lst", "step2_out.pdb", "ms_out"]:
+        fp = mcce_dir.joinpath(f)
+        if not check_path(fp, raise_err=False):
+            raise EnvironmentError("MCCE output missing: {fp}.")
+
+    step4_done = None
+    runprm = mcce_dir.joinpath("run.prm.record")
+    try:
+        step4_done = subprocess.check_output(
+            f"grep 'STEP4' {runprm}", stderr=subprocess.STDOUT, shell=True
+        ).decode()
+    except CalledProcessError:
+        pass
+
+    if step4_done is None:
+        raise EnvironmentError(
+            "MCCE Step4 not done (missing in run.prm.record), but required."
+        )
+
+    return
+
+
 def main(argv=None):
     cli_parser = generate_parser()
     args = cli_parser.parse_args(argv)
@@ -957,7 +1039,7 @@ def main(argv=None):
         return 0
 
     mcce_dir = Path(args.mcce_dir)
-    check_path(mcce_dir)
+    check_mcce_dir(mcce_dir)
 
     ms = MS(
         mcce_dir,
