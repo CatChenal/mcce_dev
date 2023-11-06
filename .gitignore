@@ -3,8 +3,38 @@ _tmp/
 data/4lzt
 Untitled.ipynb
 _scratch*
+
+# mcce-related:
+delphi
+delphi/delphi
+lib/delphi/delphi
+mcce
+*.opp
+*.dat
+wiki/site/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Workspaces:
+__pycache__/
+.vscode
+*.code-workspace
+.idea
+.DS_Store
+.ipynb_checkpoints
+*.swp
+# wsl tracks
 *:Zone.Identifier
 
+# Note: a lot of the following items
+# could be taken care of by Makefile:
 # Prerequisites
 *.d
 # Object files
@@ -51,37 +81,3 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
-
-.idea
-__pycache__/
-*.swp
-.DS_Store
-.vscode
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# vscode workspace:
-*.code-workspace
-# wsl tracks
-*Zone.Identifier
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-delphi
-delphi/delphi
-lib/delphi/delphi
-mcce
-*.opp
-*.dat
-testcase_1A2P/
-testcase_cai/
-6JYT/
-wiki/site/
