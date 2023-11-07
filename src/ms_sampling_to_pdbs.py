@@ -13,6 +13,7 @@ PRE-REQUISITES:
      MCCE output:        Info extracted:
      ...................................
     o run.prm.record     STEP$, MONTE_T and MONTE_RUNS
+    o name.txt           Atom and cofactors renaming rules
     o step2_out.pdb      Coordinates
     o head3.lst          Conformer index and id, e.g. 00017, GLU-1A0007_005
     o ms_out/            Microstates data from "msout files", e.g. ms_out/pH5eH0ms.txt
@@ -319,33 +320,12 @@ def split_msout_file(msout_fname: str, MC_RUNS: int, overwrite: bool = False):
     return
 
 
-def sort_microstate_list0(
-    ms_list: list, sort_by: str = "energy", reverse: bool = False
-) -> list:
-    """Sort a list of Microstate objects by 'energy' or 'count'.
-    Args:
-        ms_list (list): list of Microstate objects ([MS.Microstate,..]).
-        sort_by (str, "energy"): Sort key name, one of "energy" or "count", case insensitive.
-        reverse (bool, False): Argument for `sorted` function.
-    """
-
-    if not sort_by or sort_by is None:
-        raise ValueError("Argument `sort_by` is required; one of ['energy', 'count'].")
-
-    sort_by = sort_by.lower()
-    if by not in ["energy", "count"]:
-        raise ValueError(f"Values for `sort_by` are 'energy' or 'count'; Given: {by}")
-
-    idx = 0
-    if sort_by == "count":
-        idx = 1
-    ms_values = [[m.E, m.count, m.state] for m in ms_list]
-
-    return sorted(ms_values, key=lambda x: x[idx], reverse=reverse)
-
-
 # ... classes .................................................................
 class Conformer:
+    """Minimal Conformer class for use in microstate analysis.
+    Attributes: iconf, confid, resid, crg.
+    """
+
     def __init__(self):
         self.iconf = 0
         self.confid = ""
@@ -400,7 +380,14 @@ class Microstate:
 
 
 class MS:
-    """Uses split ms_out files."""
+    """The Microstates main class.
+    Uses split ms_out files, so processes one MC runs at a time.
+    For a given instance, loading of MC data is implemented by `get_mc_data` method,
+    which is cached.
+    Example:
+        ms = MS("some/folder", 7,0,) # selected_MC=0 by default"""
+
+    # do something
 
     def __init__(
         self,
@@ -642,12 +629,72 @@ class MS:
             by = "E"
         return sorted(self.microstates, key=operator.attrgetter(by), reverse=reverse)
 
-    def verify_counts(self):
-        """Verify that the microstates counts iteratively added in MS.counts
-        equal RUNS * len(ms.conformers) * NITER.
+    def sample_microstates(
+        self,
+        size: int,
+        kind: str = "deterministic",
+        sort_by: str = "energy",
+        reverse: bool = False,
+    ) -> tuple:
+        """
+        Implement a sampling of MS.microstates depending on `kind`.
+        Args:
+            size (int): sample size
+            kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
+                If 'deterministic', the microstates in ms_list are sorted then sampled at
+                regular intervals otherwise, the sampling is random. Case insensitive.
+            sort_by (str, "energy"): Only applies if kind is "deterministic".
+            reverse (bool, False): Only applies if kind is "deterministic".
+        Returns:
+            A 3-tuple: cumsum of MC.count in ms.microstates,
+                       array of indices for selection,
+                       ms_list?
         """
 
-        ms_calc = self.MC_RUNS * len(self.conformers) * self.MC_NITER
+        kind = kind.lower()
+        if kind not in ["deterministic", "random"]:
+            raise ValueError(
+                f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
+            )
+
+        if kind == "deterministic":
+            if (sort_by is None) or (sort_by == "energy"):
+                sort_by = "E"
+            else:
+                sort_by = sort_by.lower()
+                if sort_by not in ["energy", "count"]:
+                    raise ValueError(
+                        f"Values for `sort_by` are 'energy' or 'count'; Given: {by}"
+                    )
+
+            ms_list = self.sort_microstates(by=sort_by, reverse=reverse)
+            count_selection = np.arange(size, self.counts - size, self.counts / size)
+        else:
+            ms_list = self.microstates
+            rng = np.random.default_rng()
+            count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
+
+        ms_cumsum = np.cumsum([mc.count for mc in ms_list])
+
+        return ms_cumsum, count_selection, ms_list
+
+    def get_selected_confs(self, selected_ms):
+        """Return the list of conformer ids for selected_ms.
+        Args:
+            selected_ms (list): List of Microstates objects.
+        """
+
+        return [
+            conf.confid
+            for conf in self.conformers
+            if conf.iconf in selected_ms.state() or conf.iconf in self.fixed_iconfs
+        ]
+
+    def verify_counts(self):
+        """Verify that the microstates counts iteratively added in MS.counts
+        equal NITER * len(ms.conformers).
+        """
+        ms_calc = self.MC_NITER * (len(self.ires_by_iconf) + 1)
         if ms_calc != self.counts:
             print(
                 f"Unexpected microstates count: {self.counts = :,}, should be: {ms_calc:,}"
@@ -655,113 +702,42 @@ class MS:
 
         return
 
+    def get_pdb_remark(ms_index: int):
+        """Return a REMARK 250 string with data from the MS.microstates[ms_index]] to prepend in a pdb.
 
-def sample_microstates(
-    ms: MS,
-    size: int,
-    kind: str = "deterministic",
-    sort_by: str = "energy",
-    reverse: bool = False,
-) -> tuple:
-    """
-    Implement a sampling of MS.microstates depending on `kind`.
-    Args:
-        ms (MS): An instance of the MS class.
-        size (int): sample size
-        kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
-            If 'deterministic', the microstates in ms_list are sorted then sampled at
-            regular intervals otherwise, the sampling is random. Case insensitive.
-        sort_by (str, "energy"): Only applies if kind is "deterministic".
-        reverse (bool, False): Only applies if kind is "deterministic".
-    Returns:
-        A 3-tuple: cumsum of MC.count in ms.microstates,
-                   array of indices for selection,
-                   ms_list?
-    """
+        > REMARK 250 is mandatory if other than X-ray, NMR, neutron, or electron study.
+        [Ref]: https://www.wwpdb.org/documentation/file-format-content/format33/remarks1.html
+        """
 
-    kind = kind.lower()
-    if kind not in ["deterministic", "random"]:
-        raise ValueError(
-            f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
+        R250 = """
+    REMARK 250
+    REMARK 250 EXPERIMENTAL DETAILS
+    REMARK 250   EXPERIMENT TYPE               : MCCE simulation
+    REMARK 250   DATE OF DATA COLLECTION       : {DATE}
+    REMARK 250   REMARK: Date of data collection is the date this pdb was created.
+    REMARK 250 EXPERIMENTAL CONDITIONS
+    REMARK 250   TEMPERATURE                   : {T:.2f} (K)
+    REMARK 250   PH                            : {PH:.2f}
+    REMARK 250   EH                            : {EH:.2f}
+    REMARK 250   METHOD                        : {METHOD}
+    REMARK 250   SELECTED MONTERUN             : {MC}
+    REMARK 250   SELECTED MICROSTATE INDEX     : {MS:,}
+    REMARK 250   SELECTED MICROSTATE ENERGY    : {E:.2f} (kcal/mol)
+    REMARK 250
+    """
+        dte = datetime.today()
+        remark = R250.format(
+            DATE=dte.strftime("%d-%b-%y"),
+            T=self.T,
+            PH=self.pH,
+            EH=self.Eh,
+            METHOD=self.method,
+            MC=self.selected_MC,
+            MS=ms_index,
+            E=self.microstates[ms_index].E,
         )
-    if kind == "deterministic":
-        if (sort_by is None) or (sort_by == "energy"):
-            sort_by = "E"
-        else:
-            sort_by = sort_by.lower()
-            if sort_by not in ["energy", "count"]:
-                raise ValueError(
-                    f"Values for `sort_by` are 'energy' or 'count'; Given: {by}"
-                )
 
-        ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
-    else:
-        ms_list = ms.microstates
-
-    ms_cumsum = np.cumsum([mc.count for mc in ms_list])
-
-    if kind == "deterministic":
-        X = ms.counts - size
-        Y = ms.counts / size
-        count_selection = np.arange(size, X, Y)
-    else:
-        rng = np.random.default_rng()
-        count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
-
-    return ms_cumsum, count_selection, ms_list
-
-
-def get_selected_confs(ms: MS, selected_ms):
-    """Return the list of conformer ids for selected_ms.
-    Args:
-        ms (MS): class instance
-        selected_ms (int?): A single ms from MS.microstates list.
-    """
-
-    return [
-        conf.confid
-        for conf in ms.conformers
-        if conf.iconf in selected_ms[2]() or conf.iconf in ms.fixed_iconfs
-    ]
-
-
-def get_pdb_remark(ms: MS, ms_index: int):
-    """Return a REMARK 250 string to prepend in pdb.
-
-    > REMARK 250 is mandatory if other than X-ray, NMR, neutron, or electron study.
-    [Ref]: https://www.wwpdb.org/documentation/file-format-content/format33/remarks1.html
-    """
-
-    R250 = """
-REMARK 250
-REMARK 250 EXPERIMENTAL DETAILS
-REMARK 250   EXPERIMENT TYPE               : MCCE simulation
-REMARK 250   DATE OF DATA COLLECTION       : {DATE}
-REMARK 250   REMARK: DATE OF DATA COLLECTION is the date this pdb was created.
-REMARK 250 EXPERIMENTAL CONDITIONS
-REMARK 250   TEMPERATURE                   : {T:.2f} (K)
-REMARK 250   PH                            : {PH:.2f}
-REMARK 250   EH                            : {EH:.2f}
-REMARK 250   METHOD                        : {METHOD}
-REMARK 250   SELECTED MONTERUN             : {MC}
-REMARK 250   SELECTED MICROSTATE INDEX     : {MS:,}
-REMARK 250   SELECTED MICROSTATE ENERGY    : {E:.2f} (kcal/mol)
-REMARK 250
-"""
-    dte = datetime.today()
-    sel_ms = ms.microstates[ms_index]
-    remark = R250.format(
-        DATE=dte.strftime("%d-%b-%y"),
-        T=ms.T,
-        PH=ms.pH,
-        EH=ms.Eh,
-        METHOD=ms.method,
-        MC=ms.selected_MC,
-        MS=ms_index,
-        E=sel_ms.E,
-    )
-
-    return remark
+        return remark
 
 
 def ms_to_pdb(
@@ -771,15 +747,21 @@ def ms_to_pdb(
     remark_data: str,
     step2_path: str,
     output_folder: str,
+    output_pdb_format: str,
 ) -> None:
     """Create a new pdb file in `output_folder` from the `selected_confs`
     Args:
+        selected_confs (list): List of selected Microstates objects.
         ms_index (int): Index of selected ms, part of output pdb filename.
         mc_run (int): Index of MC record used, part of output pdb filename.
+        remark_data (str): Used to create pdb REMARK 250 section to provide
+                           experimental data (T, PH, EH, METHOD) that can be
+                           prepended into a pdb.
         step2_path (str): path to step2_out.pdb.
         output_folder (str): path to folder for pdb created from selected_ms.
-        remark_data_exper (str): Used to create pdb REMARK section: data from MS instance:
-                                  experimental (T, PH, EH, METHOD).
+        output_pdb_format (str, ): PDB format to use when writing the output pdb;
+            one of ["standard", "gromacs", "amber"].
+
     Returns:
         None: The created file names format is f"mc{mc_run}_ms{ms_index}.pdb".
 
@@ -806,7 +788,6 @@ def ms_to_pdb(
         with open(file_name, "w") as output_pdb:
             output_pdb.write(remark_data)
             for line in pdb:
-                # TODO check if res is cofactor ->
                 confID = line[17:20] + line[80:82] + line[21:26] + sep + line[27:30]
                 if confID[3:5] == "BK":
                     output_pdb.write(line)
@@ -866,8 +847,8 @@ def pdbs_from_ms_samples(
     elif clear_pdbs_folder:
         clear_folder(pdb_out_folder)
 
-    ms_cumsum, count_selection, ms_sampled = sample_microstates(
-        ms, n_sample_size, kind=sample_kind, sort_by=ms_sort_by, reverse=ms_sort_reverse
+    ms_cumsum, count_selection, ms_sampled = ms.sample_microstates(
+        n_sample_size, kind=sample_kind, sort_by=ms_sort_by, reverse=ms_sort_reverse
     )
 
     # Summarize what's being done:
@@ -881,7 +862,7 @@ def pdbs_from_ms_samples(
         ms_index = np.where((ms_cumsum - c) > 0)[0][0]
         ms_selection = ms_sampled[ms_index]
 
-        confs_for_pdb = get_selected_confs(ms, ms_selection)
+        confs_for_pdb = ms.get_selected_confs(ms_selection)
 
         # gather initial data for REMARK section of pdb:
         remark_data = get_pdb_remark(ms, ms_index)
@@ -911,7 +892,6 @@ def generate_parser():
 
     p = ArgumentParser(
         prog=__name__,
-        # "ms_sampling_to_pdbs",
         description=__doc__,
         usage=USAGE,
         formatter_class=RawDescriptionHelpFormatter,
@@ -938,9 +918,9 @@ def generate_parser():
     )
     p.add_argument(
         "-MC",
-        type=int,
-        default=0,
-        help="The (zero-based) index of the MONTERUNS to use; default: %(default)s.",
+        type=list,
+        default=[0],
+        help="List for (zero-based) indices of the MONTERUNS to use; default: %(default)s.",
     )
     p.add_argument(
         "-overwrite_split_files",
@@ -982,7 +962,7 @@ def generate_parser():
         type=str,
         default=None,
         help="""The path of the folder receiving the created pdb files. If not provided, the path
-        defaults to mcce_dir/ms_out/msout_file_dir/pdbs_from_ms, otherwise he actual output folder
+        defaults to mcce_dir/ms_out/msout_file_dir/pdbs_from_ms, otherwise the actual output folder
         will be: output_dir/pdbs_from_ms; default: %(default)s.""",
     )
     p.add_argument(
@@ -1008,7 +988,7 @@ def check_mcce_dir(mcce_dir):
     2. These also exist: head3.lst, step2_out.pdb, and ms_out folder
     """
 
-    for f in ["run.prm.record", "head3.lst", "step2_out.pdb", "ms_out"]:
+    for f in ["run.prm.record", "name.txt", "head3.lst", "step2_out.pdb", "ms_out"]:
         fp = mcce_dir.joinpath(f)
         if not check_path(fp, raise_err=False):
             raise EnvironmentError("MCCE output missing: {fp}.")
@@ -1030,31 +1010,33 @@ def check_mcce_dir(mcce_dir):
     return
 
 
-def main(argv=None):
+def cli_ms2pdb(argv=None):
+    """"""
+
     cli_parser = generate_parser()
     args = cli_parser.parse_args(argv)
-    print(type(args))
+
     if args is None:
         cli_parser.print_help()
-        return 0
+        return
 
     mcce_dir = Path(args.mcce_dir)
     check_mcce_dir(mcce_dir)
-
-    ms = MS(
-        mcce_dir,
-        args.pH,
-        args.Eh,
-        selected_MC=args.MC,
-        overwrite_split_files=args.overwrite_split_files,
-    )
-    print(f"ms instanciated with:\n{ms}")
-    print(MS.__doc__)
 
     kind = "deterministic"
     if args.sample_kind[0] == "r":
         kind = "random"
 
+    mc = args.MC.pop(0)
+    # use 1st MC to populate all attributes:
+    ms = MS(
+        mcce_dir,
+        args.pH,
+        args.Eh,
+        selected_MC=mc,
+        overwrite_split_files=args.overwrite_split_files,
+    )
+    # write 1st batch of sampled pdbs:
     pdbs_from_ms_samples(
         ms,
         mcce_dir,
@@ -1066,8 +1048,26 @@ def main(argv=None):
         clear_pdbs_folder=args.clear_pdbs_folder,
         list_files=args.list_files,
     )
+
+    while args.MC:
+        mc = args.MC.pop(0)
+        # update the class attribute for MC selection:
+        ms.selected_MC = mc
+
+        # write another batch of sampled pdbs:
+        pdbs_from_ms_samples(
+            ms,
+            mcce_dir,
+            args.sample_size,
+            sample_kind=kind,
+            ms_sort_by=args.sort_by,
+            ms_sort_reverse=args.reverse_sort,
+            output_dir=args.output_dir,
+            clear_pdbs_folder=args.clear_pdbs_folder,
+            list_files=args.list_files,
+        )
     return
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(cli_ms2pdb(sys.argv[1:]))
