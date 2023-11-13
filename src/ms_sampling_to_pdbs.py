@@ -1199,7 +1199,7 @@ def check_mcce_dir(mcce_dir):
     for f in ["run.prm.record", "name.txt", "head3.lst", "step2_out.pdb", "ms_out"]:
         fp = mcce_dir.joinpath(f)
         if not check_path(fp, raise_err=False):
-            raise EnvironmentError("MCCE output missing: {fp}.")
+            raise EnvironmentError(f"MCCE output missing: {fp}.")
 
     step4_done = None
     runprm = mcce_dir.joinpath("run.prm.record")
