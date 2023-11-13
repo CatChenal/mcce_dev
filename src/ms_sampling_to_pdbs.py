@@ -33,13 +33,12 @@ Minimal number of arguments: --mcce_dir, --pH, --Eh, --sample_size
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import datetime
-from functools import lru_cache
 import numpy as np
 import operator
 from pathlib import Path
 import subprocess
 import sys
-from typing import Union
+from typing import Union, List
 import zlib
 
 
@@ -49,6 +48,24 @@ MONTE_RUNS = 6
 VALID_MC_METHODS = [
     "MONTERUNS",
 ]
+
+# pdb remark section:
+R250 = """
+REMARK 250
+REMARK 250 EXPERIMENTAL DETAILS
+REMARK 250   EXPERIMENT TYPE               : MCCE simulation
+REMARK 250   DATE OF DATA COLLECTION       : {DATE}
+REMARK 250   REMARK: Date of data collection is the date this pdb was created.
+REMARK 250 EXPERIMENTAL CONDITIONS
+REMARK 250   TEMPERATURE                   : {T:.2f} (K)
+REMARK 250   PH                            : {PH:.2f}
+REMARK 250   EH                            : {EH:.2f}
+REMARK 250   METHOD                        : {METHOD}
+REMARK 250   SELECTED MONTERUN             : {MC}
+REMARK 250   SELECTED MICROSTATE INDEX     : {MS:,}
+REMARK 250   SELECTED MICROSTATE ENERGY    : {E:.2f} (kcal/mol)
+REMARK 250
+"""
 
 
 def get_msout_filename(
@@ -156,15 +173,18 @@ def check_path(filepath: str, raise_err=True) -> None:
 
 def check_msout_split(msout_file_dir: Path, runprm_mcruns: int) -> bool:
     """Return True if the header and the MCi files exist."""
-    b = msout_file_dir.joinpath("header").exists()
-    if not b:
-        # print(f"Split file (header) not found.")
+
+    if not msout_file_dir.joinpath("header").exists():
+        print(f"Split file (header) not found.")
         return False
+
     for i in range(runprm_mcruns):
-        b = b and msout_file_dir.joinpath(f"MC{i}").exists()
-        if not b:
-            print(f"Split file MC{i} not found.")
+        mc = msout_file_dir.joinpath(f"MC{i}")
+        mcnpz = msout_file_dir.joinpath(f"MC{i}.npz")
+        if not (mc.exists() or mcnpz.exists()):
+            print(f"Split file MC{i} (or MC{i}.npz) not found.")
             return False
+
     return True
 
 
@@ -192,6 +212,68 @@ def read_conformers(head_3_path: str) -> tuple:
     return conformers, iconf_by_confname
 
 
+def MC_to_npz(MC_file: str, ires_by_iconf: dict, overwrite: bool = False) -> None:
+    """Process a MC record file for counts and microstates and save them
+    into a numpy.npz file"""
+
+    MC_file = Path(MC_file)
+    MC_npz = MC_file.parent.joinpath(MC_file.name + ".npz")
+
+    delete = False
+    npz_exists = MC_npz.exists()
+    if npz_exists:
+        if not overwrite:
+            raise FileExistsError(
+                f"Found: {MC_npz}. Set `overwrite` to True to replace it."
+            )
+        else:
+            # postpone deletion after processing
+            delete = True
+
+    counts = 0
+    microstates = []
+    microstates_by_id = {}
+
+    with open(MC_file) as fh:
+        mc_iter = -1
+        for nl, line in enumerate(fh):
+            line = line.strip()
+
+            if nl == 0:
+                _, confs = line.split(":")
+                current_state = [int(c) for c in confs.split()]
+                if not current_state:
+                    msg = "The current ms state line cannot be empty.\n"
+                    msg = msg + f"\tProblem line in {MC_file}: {nl}"
+                    if npz_exists:
+                        msg = msg + f"\tExisting file was kept: {MC_npz}."
+                    raise ValueError(msg)
+                continue
+
+            fields = line.split(",")
+            if len(fields) >= 3:
+                mc_iter += 1
+                state_e = float(fields[0])
+                count = int(fields[1])
+                # flipped confs:
+                for ic in [int(c) for c in fields[2].split()]:
+                    current_state[ires_by_iconf[ic]] = ic
+
+                ms = Microstate(current_state, state_e, count, mc_iter)
+                if ms.stateid in microstates_by_id.keys():
+                    microstates_by_id[ms.stateid].count += count
+                else:
+                    microstates_by_id[ms.stateid] = ms
+                counts += count
+
+    microstates = list(microstates_by_id.values())
+    if delete:
+        MC_npz.unlink()
+    np.savez(MC_npz, counts=counts, microstates=microstates, allow_pickle=True)
+
+    return
+
+
 def split_msout_file(msout_fname: str, MC_RUNS: int, overwrite: bool = False):
     """Split the msout file into a "header" portion (preceeding MC:0 line) and MCi files
     for the MC records in a folder created with the name of the msout_file as per arguments.
@@ -200,10 +282,9 @@ def split_msout_file(msout_fname: str, MC_RUNS: int, overwrite: bool = False):
 
     msout_file_dir, created = mkdir_from_msout_file(msout_fname)
 
-    if check_msout_split(msout_file_dir, MC_RUNS) and not overwrite:
-        print(
-            "The ms_out file is already split into header and MCi files. Set `overwrite` to True to replace them."
-        )
+    if not overwrite:
+        if not check_msout_split(msout_file_dir, MC_RUNS):
+            print("Missing some ms_out files. Set `overwrite` to True to replace them.")
         return
 
     steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
@@ -343,10 +424,11 @@ class Conformer:
 class Microstate:
     """Sortable class for microstates."""
 
-    def __init__(self, state, E, count):
+    def __init__(self, state: list, E: float, count: int, idx: int):
         self.stateid = zlib.compress(" ".join([str(x) for x in state]).encode())
         self.E = E
         self.count = count
+        self.idx = idx  # needed to recover correct ms if list is sorted
 
     def state(self):
         return [int(i) for i in zlib.decompress(self.stateid).decode().split()]
@@ -358,25 +440,40 @@ class Microstate:
             hasattr(other, "stateid")
             and hasattr(other, "E")
             and hasattr(other, "count")
+            and hasattr(other, "idx")
         ):
             return NotImplemented("Comparison with non Microstate object.")
         return
 
     def __eq__(self, other):
         self._check_operand(other)
-        return (self.stateid, self.E, self.count) == (
+        return (self.stateid, self.E, self.count, self.idx) == (
             other.stateid,
             other.E,
             other.count,
+            other.idx,
         )
 
     def __lt__(self, other):
         self._check_operand(other)
-        return (self.stateid, self.E, self.count) < (
+        return (self.stateid, self.E, self.count, self.idx) < (
             other.stateid,
             other.E,
             other.count,
+            other.idx,
         )
+
+
+def needs_mc(fn):
+    def decorator(self, *args, **kwargs):
+        if (self.selected_MC is None) or (not self.microstates):
+            print(
+                "Run `.get_mc_data(n)` for a specific MC record (n) to populate the microstates data."
+            )
+        else:
+            return fn(self, *args, **kwargs)
+
+    return decorator
 
 
 class MS:
@@ -385,16 +482,14 @@ class MS:
     For a given instance, loading of MC data is implemented by `get_mc_data` method,
     which is cached.
     Example:
-        ms = MS("some/folder", 7,0,) # selected_MC=0 by default"""
-
-    # do something
+        ms = MS("some/folder", 7, 0)
+    """
 
     def __init__(
         self,
         mcce_output_path: str,
         pH: Union[int, float],
         Eh: Union[int, float],
-        selected_MC: int = 0,
         overwrite_split_files: bool = False,
     ):
         """MS.init
@@ -403,14 +498,12 @@ class MS:
             mcce_output_path (str): A MCCE simulation output folder.
             pH (int or float): A pH point.
             Eh (int or float): A Eh point.
-            selected_MC (int, 0): The index of an MC run; one of `range(constants.MONTERUNS)`.
             overwrite_split_files (bool, False): whether to redo the splitting of msout_file.
         """
 
         self.mcce_out = Path(mcce_output_path)
         self.pH = pH
         self.Eh = Eh
-        self._selected_MC = selected_MC
         self.overwrite_split_files = overwrite_split_files
 
         self.T = None
@@ -424,34 +517,34 @@ class MS:
 
         self.fname = get_msout_filename(self.mcce_out, self.pH, self.Eh)
         self.msout_fpath = self.mcce_out.joinpath(self.fname)
-        print("msout_fpath:", self.msout_fpath)
         self.msout_file_dir, created = mkdir_from_msout_file(self.fname)
-        print("msout_file_dir, created:", created, self.msout_file_dir)
         if created:
             split_msout_file(self.msout_fpath, self.MC_RUNS)
         elif self.overwrite_split_files:
             clear_folder(self.msout_file_dir)
             split_msout_file(self.msout_fpath, self.MC_RUNS, overwrite=True)
+            self.overwrite_split_files = False
+        else:
+            if not check_msout_split(self.msout_file_dir, self.MC_RUNS):
+                split_msout_file(self.msout_fpath, self.MC_RUNS)
+                self.overwrite_split_files = False
 
         self.method = ""
         self.fixed_iconfs = []
         self.fixed_residue_names = []
-        self.fixed_crg = 0.0
-        self.fixed_ne = 0.0
-        self.fixed_nh = 0.0
         self.free_residues = []  # free residues, referred by conformer indices
         self.free_residue_names = []
         self.ires_by_iconf = {}  # index of free residue by index of conf
         self._get_header_data()
 
+        self._selected_MC = None
         self.microstates = []  # list of microstates
         self.counts = 0
-        self.get_mc_data(self.selected_MC)
 
-        check_msout_split(self.msout_file_dir, self.MC_RUNS)
+        self.new_MC = False
 
     def __repr__(self):
-        return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, selected_MC={self.selected_MC}, overwrite_split_files={self.overwrite_split_files})"""
+        return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, overwrite_split_files={self.overwrite_split_files})"""
 
     @property
     def selected_MC(self):
@@ -459,51 +552,44 @@ class MS:
 
     @selected_MC.setter
     def selected_MC(self, value):
-        if self.T is None:
-            # init
-            what = MONTE_RUNS
-        else:
-            what = self.MC_RUNS
-        if value >= what:
-            print(
-                f"This value is beyond the range of MONTE_RUNS({RUNS}) used in this simulation: {value}."
-            )
-        else:
-            self._selected_MC = value
-
-    def __eq__(self, other):
-        return self.selected_MC == other.selected_MC
-
-    def __hash__(self):
-        return hash(self.selected_MC)
+        if value is not None:
+            if value >= self.MC_RUNS:
+                raise ValueError(
+                    f"{value=} is beyond the range of MONTE_RUNS: (0,{self.MC_RUNS}] used in this MCCE simulation."
+                )
+        self.new_MC = value != self._selected_MC
+        self._selected_MC = value
 
     def _get_runprm_data(self):
         """Populate class vars: T, MC_RUNS, MC_NITER."""
-        print("Getting runprm data.")
+
         runprm = self.mcce_out.joinpath("run.prm.record")
         check_path(runprm)
+        print("Getting runprm data.")
 
-        prmdata = (
-            subprocess.check_output(
-                f"grep -E 'MONTE_T)|MONTE_RUNS|MONTE_NITER' {runprm} | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
-                stderr=subprocess.STDOUT,
-                shell=True,
+        try:
+            prmdata = (
+                subprocess.check_output(
+                    f"grep -E 'MONTE_T)|MONTE_RUNS|MONTE_NITER' {runprm} | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
+                    stderr=subprocess.STDOUT,
+                    shell=True,
+                )
+                .decode()
+                .splitlines()
             )
-            .decode()
-            .splitlines()
-        )
-
-        self.T = float(prmdata[0].split()[0])
-        self.MC_RUNS = int(prmdata[1].split()[0])
-        self.MC_NITER = int(prmdata[2].split()[0])
+            self.T = float(prmdata[0].split()[0])
+            self.MC_RUNS = int(prmdata[1].split()[0])
+            self.MC_NITER = int(prmdata[2].split()[0])  # for counts verification, keep?
+        except Exception as E:
+            raise ValueError(f"Could not query run.prm.record.\n{E}")
 
         return
 
     def _get_conformer_data(self):
         """Populate class vars: conformers, iconf_by_confname."""
-        print("Getting conformers data.")
         head3_path = self.mcce_out.joinpath("head3.lst")
         check_path(head3_path)
+        print("Getting conformers data.")
         self.conformers, self.iconf_by_confname = read_conformers(head3_path)
 
         return
@@ -569,72 +655,66 @@ class MS:
                     self.free_residue_names = [
                         self.conformers[g[0]].resid for g in self.free_residues
                     ]
-                    for ires, res in enumerate(self.free_residues):
+                    for i, res in enumerate(self.free_residues):
                         for iconf in res:
-                            self.ires_by_iconf[iconf] = ires
+                            self.ires_by_iconf[iconf] = i
                     steps_done["fee"] = True
 
         return
 
-    @lru_cache(maxsize=None)
     def get_mc_data(self, MC: int):
-        """Populate class vars microstates with the data from a MC file identified
-        in `self.selected_MC`.
+        """Populate MS.microstates and MS.counts with the data from a MC file identified
+        by `MC`.
         """
-        print("Getting MC data for:", MC)
-        if MC != self.selected_MC:
+        if not self.new_MC:
+            if MC == self.selected_MC:
+                print(f"Same MC: {MC}")
+                return
+
+        if self.new_MC or MC != self.selected_MC:
             self.selected_MC = MC
 
-        microstates_by_id = {}
+            print(f"Getting MC data from .npz file for MC{MC}")
 
-        MC_file = self.msout_file_dir.joinpath(f"MC{self.selected_MC}")
-        with open(MC_file) as fh:
-            for nl, line in enumerate(fh):
-                line = line.strip()
+            MC_file = self.msout_file_dir.joinpath(f"MC{self.selected_MC}")
+            MC_npz = MC_file.parent.joinpath(MC_file.name + ".npz")
+            if not MC_npz.exists():
+                MC_to_npz(MC_file, self.ires_by_iconf)
+                MC_file.unlink()
 
-                if nl == 0:
-                    _, confs = line.split(":")
-                    current_state = [int(c) for c in confs.split()]
-                    if not current_state:
-                        msg = "The current ms state line cannot be empty.\n"
-                        msg = msg + f"\tProblem line in {MC_file}: {nl}"
-                        raise ValueError(msg)
-                    continue
-
-                fields = line.split(",")
-                if len(fields) >= 3:
-                    state_e = float(fields[0])
-                    count = int(fields[1])
-                    # flipped confs:
-                    for ic in [int(c) for c in fields[2].split()]:
-                        current_state[self.ires_by_iconf[ic]] = ic
-
-                    ms = Microstate(current_state, state_e, count)
-                    if ms.stateid in microstates_by_id.keys():
-                        microstates_by_id[ms.stateid].count += count
-                    else:
-                        microstates_by_id[ms.stateid] = ms
-                    self.counts += count
-
-        self.microstates = list(microstates_by_id.values())
+            mc_data = np.load(MC_npz, allow_pickle=True)
+            self.counts = mc_data["counts"].tolist()
+            self.microstates = mc_data["microstates"].tolist()
 
         return
 
-    def sort_microstates(self, by: str = "E", reverse: bool = False):
+    @needs_mc
+    def sort_microstates(self, by: str, reverse: bool = False) -> list:
         """Return a sorted copy of MS.microstates."""
+
+        if not by:
+            print(
+                "`MS.sort_microstates` missing sort `by` parameter.",
+                "Returning MS.microstates.",
+            )
+            return self.microstates
+
         by = by.lower()
         if by not in ["energy", "count"]:
             raise ValueError(f"Values for `by` are 'energy' or 'count'; Given: {by}")
         if by[0] == "e":
             by = "E"
+
         return sorted(self.microstates, key=operator.attrgetter(by), reverse=reverse)
 
-    def sample_microstates(
+    @needs_mc
+    def get_sampling_params(
         self,
         size: int,
         kind: str = "deterministic",
-        sort_by: str = "energy",
+        sort_by: Union[str, None] = "energy",
         reverse: bool = False,
+        seed: Union[None, int] = None,
     ) -> tuple:
         """
         Implement a sampling of MS.microstates depending on `kind`.
@@ -646,9 +726,7 @@ class MS:
             sort_by (str, "energy"): Only applies if kind is "deterministic".
             reverse (bool, False): Only applies if kind is "deterministic".
         Returns:
-            A 3-tuple: cumsum of MC.count in ms.microstates,
-                       array of indices for selection,
-                       ms_list?
+            ms_list, ms_indices, info
         """
 
         kind = kind.lower()
@@ -658,42 +736,132 @@ class MS:
             )
 
         if kind == "deterministic":
-            if (sort_by is None) or (sort_by == "energy"):
-                sort_by = "E"
-            else:
-                sort_by = sort_by.lower()
-                if sort_by not in ["energy", "count"]:
-                    raise ValueError(
-                        f"Values for `sort_by` are 'energy' or 'count'; Given: {by}"
-                    )
+            if not sort_by:
+                sort_by = "energy"
 
+            sort_by = sort_by.lower()
+            if sort_by not in ["energy", "count"]:
+                raise ValueError(
+                    f"Values for `sort_by` are 'energy' or 'count'; Given: {sort_by}"
+                )
+
+            # needed for cumsum:
             ms_list = self.sort_microstates(by=sort_by, reverse=reverse)
-            count_selection = np.arange(size, self.counts - size, self.counts / size)
+            sampled_ms_indices = np.arange(
+                size, self.counts - size, self.counts / size, dtype=int
+            )
+            info = [f"{size=}, {kind=}, {sort_by=}, {reverse=}"]
         else:
             ms_list = self.microstates
-            rng = np.random.default_rng()
-            count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
+            rng = np.random.default_rng(seed=seed)
+            sampled_ms_indices = rng.integers(
+                low=0, high=len(self.microstates), size=size, endpoint=True
+            )
+            info = [f"{size=}, {kind=}, {seed=}"]
 
-        ms_cumsum = np.cumsum([mc.count for mc in ms_list])
+        info.append(f"MC={self.selected_MC}")
+        sampled_cumsum = np.cumsum([mc.count for mc in ms_list])
+        if kind == "random":
+            ms_list = None  # no copy
 
-        return ms_cumsum, count_selection, ms_list
+        ms_indices = []
+        for i, c in enumerate(sampled_ms_indices):
+            ms_sel_index = np.where((sampled_cumsum - c) > 0)[0][0]
+            ms_indices.append(ms_sel_index)
 
-    def get_selected_confs(self, selected_ms):
-        """Return the list of conformer ids for selected_ms.
+        return ms_list, ms_indices, info
+
+    @needs_mc
+    def get_sampled_ms(
+        self,
+        size: int,
+        kind: str = "deterministic",
+        sort_by: Union[str, None] = "energy",
+        reverse: bool = False,
+        seed: Union[None, int] = None,
+    ) -> list:
+        """
+        Implement a sampling of MS.microstates depending on `kind`.
         Args:
-            selected_ms (list): List of Microstates objects.
+            size (int): sample size
+            kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
+                If 'deterministic', the microstates in ms_list are sorted then sampled at
+                regular intervals otherwise, the sampling is random. Case insensitive.
+            sort_by (str, "energy"): Only applies if kind is "deterministic".
+            reverse (bool, False): Only applies if kind is "deterministic".
+        Returns:
+            A list of the selected microstate objects.
         """
 
-        return [
-            conf.confid
-            for conf in self.conformers
-            if conf.iconf in selected_ms.state() or conf.iconf in self.fixed_iconfs
-        ]
+        kind = kind.lower()
+        sort_by = sort_by.lower()
+        ms_list, ms_indices, info = self.get_sampling_params(
+            size, kind=kind, sort_by=sort_by, reverse=reverse, seed=seed
+        )
+        if kind == "random":
+            ms_list = self.microstates
 
+        out = []
+        for i, c in enumerate(sampled_ms_indices):
+            ms_sel_index = np.where((sampled_cumsum - c) > 0)[0][0]
+            out.append(ms_list[ms_sel_index])
+
+        info.append(f"MC={self.selected_MC}")
+
+        return out, info
+
+    def get_selected_confs(
+        self, ms_selected: list, output_val: str = "confid", include_fixed=True
+    ) -> List:
+        """Return a list of [conformer id: str] for each
+        conformer in the ms_selected.state.
+        Args:
+            selected_ms (list): List of Microstates objects.
+            output_val (str): Which Conformer class attribute to return;
+                              One of ["confid", "iconf", "crg", "resid"].
+        """
+        if output_val not in self.conformers[0].__dict__.keys():
+            raise AttributeError(f"{output_val = } is not a Conformer attribute.")
+
+        if not include_fixed:
+            return [
+                getattr(conf, output_val)
+                for conf in self.conformers
+                if (conf.iconf in ms_selected.state())
+            ]
+        else:
+            return [
+                getattr(conf, output_val)
+                for conf in self.conformers
+                if (conf.iconf in ms_selected.state())
+                or (conf.iconf in ms.fixed_iconfs)
+            ]
+
+    def get_occ(ms, selected_ms: list) -> list:
+        """Calculate the average conformer occ over a set of microstates."""
+        conf_occ = np.zeros(len(ms.conformers))
+        for m in selected_ms:
+            for iconf in m.state():
+                conf_occ[iconf] += m.count
+
+        conf_occ /= sum(m.count for m in selected_ms)
+
+        return conf_occ.tolist()
+
+    def confnames_by_iconfs(self, iconfs: list) -> list:
+        confnames = [self.conformers[ic].confid for ic in iconfs]
+        return confnames
+
+    @needs_mc
     def verify_counts(self):
         """Verify that the microstates counts iteratively added in MS.counts
         equal NITER * len(ms.conformers).
         """
+        if self.selected_MC is None:
+            print(
+                "Run MS.get_mc_data() for a specific MC record to populate the microstates data."
+            )
+            return
         ms_calc = self.MC_NITER * (len(self.ires_by_iconf) + 1)
         if ms_calc != self.counts:
             print(
@@ -702,32 +870,15 @@ class MS:
 
         return
 
-    def get_pdb_remark(ms_index: int):
+    @needs_mc
+    def get_pdb_remark(self, ms_index: int):
         """Return a REMARK 250 string with data from the MS.microstates[ms_index]] to prepend in a pdb.
 
         > REMARK 250 is mandatory if other than X-ray, NMR, neutron, or electron study.
         [Ref]: https://www.wwpdb.org/documentation/file-format-content/format33/remarks1.html
         """
-
-        R250 = """
-    REMARK 250
-    REMARK 250 EXPERIMENTAL DETAILS
-    REMARK 250   EXPERIMENT TYPE               : MCCE simulation
-    REMARK 250   DATE OF DATA COLLECTION       : {DATE}
-    REMARK 250   REMARK: Date of data collection is the date this pdb was created.
-    REMARK 250 EXPERIMENTAL CONDITIONS
-    REMARK 250   TEMPERATURE                   : {T:.2f} (K)
-    REMARK 250   PH                            : {PH:.2f}
-    REMARK 250   EH                            : {EH:.2f}
-    REMARK 250   METHOD                        : {METHOD}
-    REMARK 250   SELECTED MONTERUN             : {MC}
-    REMARK 250   SELECTED MICROSTATE INDEX     : {MS:,}
-    REMARK 250   SELECTED MICROSTATE ENERGY    : {E:.2f} (kcal/mol)
-    REMARK 250
-    """
-        dte = datetime.today()
-        remark = R250.format(
-            DATE=dte.strftime("%d-%b-%y"),
+        return R250.format(
+            DATE=datetime.today().strftime("%d-%b-%y"),
             T=self.T,
             PH=self.pH,
             EH=self.Eh,
@@ -736,8 +887,6 @@ class MS:
             MS=ms_index,
             E=self.microstates[ms_index].E,
         )
-
-        return remark
 
 
 def ms_to_pdb(
@@ -770,41 +919,45 @@ def ms_to_pdb(
         as the one provided in `step2_path`.
     """
 
-    sep = "_"
     file_name = Path(output_folder).joinpath(f"mc{mc_run}_ms{ms_index}.pdb")
     if file_name.exists():
-        print(
-            f"File already exists: {file_name}.",
-            "Set `clear_pdbs_folder` to True and rerun if you meant to replace it.",
-        )
+        print(f"File already exists: {file_name}.")
         return
 
     # step2_out.pdb format:
     # ATOM      1  CA  NTR A0001_001   2.696   5.785  12.711   2.000       0.001      01O000M000 "
-    # 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-    #         10        20        30        40        50        60        70        80        90
+    # ATOM     44  HZ3 LYS A0001_002  -2.590   8.781   9.007   1.000       0.330      +1O000M000
+    # ATOM     45  N   VAL A0002_000   4.060   7.689  12.193   1.500      -0.350      BK____M000
+    # 01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
+    # 1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
+    #          1         2         3         4         5         6         7         8         9
     # len = 91
+
+    def in_sample(cID):
+        # return len(list(filter(lambda x: x[0] == cID, selected_confs))) != 0
+        return len(list(filter(lambda x: x == cID, selected_confs))) != 0
+
+    SEP = "_"
     with open(step2_path) as pdb:
         with open(file_name, "w") as output_pdb:
             output_pdb.write(remark_data)
             for line in pdb:
-                confID = line[17:20] + line[80:82] + line[21:26] + sep + line[27:30]
-                if confID[3:5] == "BK":
+                if line[80:82] == "BK":
                     output_pdb.write(line)
                     continue
-
-                if confID in selected_confs:
+                confID = f"{line[17:20]}{line[80:82]}{line[21:26]}{SEP}{line[27:30]}"
+                if in_sample(confID):
                     output_pdb.write(line)
     return
 
 
 def pdbs_from_ms_samples(
     ms: MS,
-    mcce_dir: str,
     n_sample_size: int,
     sample_kind: str = "deterministic",
-    ms_sort_by: str = "energy",
+    ms_sort_by: str = None,
     ms_sort_reverse: bool = False,
+    output_pdb_format: str = "standard",
     output_dir: str = None,
     clear_pdbs_folder: bool = False,
     list_files: bool = False,
@@ -813,11 +966,10 @@ def pdbs_from_ms_samples(
 
     Args:
         ms (MS): A microstate class instance.
-        mcce_dir (str): MCCE simulation output folder.
         n_sample_size (int): How many microstates, hence pdb files to create.
         sample_kind (str, "deterministic"): Kind of sampling; either regularly spaced
             or random.
-        ms_sort_by (str): Either 'energy' or 'count' (case insensitive).
+        ms_sort_by (str, None): One of 'energy' or 'count' (case insensitive).
             Only applies if `sample_kind` is "deterministic".
         ms_sort_reverse (bool, False): If True, descending order.
             Only applies if `sample_kind` is "deterministic".
@@ -826,16 +978,23 @@ def pdbs_from_ms_samples(
         clear_pdbs_folder (bool, False): Whether to delete existing pdb files.
         list_files (bool, False): Whether to list output folder contents.
     """
-    ms_sort_by = ms_sort_by.lower()
-    if ms_sort_by not in ["energy", "count"]:
-        raise ValueError(
-            f"Values for `ms_sort_by` are 'energy' or 'count'; Given: {ms_sort_by}"
-        )
-    if ms_sort_by == "energy":
-        ms_sort_by = "E"
 
-    mcce_dir = Path(mcce_dir)
-    step2_path = mcce_dir.joinpath("step2_out.pdb")
+    sample_kind = sample_kind.lower()
+    if sample_kind not in ["deterministic", "random"]:
+        raise ValueError(
+            f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
+        )
+    if ms_sort_by is None:
+        if sample_kind == "deterministic":
+            ms_sort_by = "energy"
+    else:
+        ms_sort_by = ms_sort_by.lower()
+        if ms_sort_by not in ["energy", "count"]:
+            raise ValueError(
+                f"Values for `ms_sort_by` are 'energy' or 'count'; Given: {ms_sort_by}"
+            )
+
+    step2_path = ms.mcce_output_path.joinpath("step2_out.pdb")
     check_path(step2_path)
 
     if not output_dir or output_dir is None:
@@ -847,28 +1006,38 @@ def pdbs_from_ms_samples(
     elif clear_pdbs_folder:
         clear_folder(pdb_out_folder)
 
-    ms_cumsum, count_selection, ms_sampled = ms.sample_microstates(
-        n_sample_size, kind=sample_kind, sort_by=ms_sort_by, reverse=ms_sort_reverse
+    ms_cumsum, ms_count_selection, ms_sampled = ms.get_sampling_params(
+        n_sample_size, kind=sample_kind, sort_by=ms_sort_by
     )
+    if ms_sampled is None:
+        ms_list = ms.microstates
+    else:
+        ms_list = ms_sampled
 
     # Summarize what's being done:
     print(
-        f"Creating n={n_sample_size:,} MCCE_PDB files in {output_dir} from (n) microstates sorted by '{ms_sort_by}'.\n",
-        "NOTE: the output pdb will be free of any water molecules in step2_out.pdb.",
+        f"Creating n={n_sample_size:,} MCCE_PDB files in {output_dir} from (n) microstates sorted by '{ms_sort_by}'.\n"
     )
+    # verify: "NOTE: the output pdb will be free of any water molecules in step2_out.pdb.",
 
     mc_run = ms.selected_MC  # part of pdb name
-    for c in count_selection:
-        ms_index = np.where((ms_cumsum - c) > 0)[0][0]
-        ms_selection = ms_sampled[ms_index]
 
+    for c in ms_count_selection:
+        ms_index = np.where((ms_cumsum - c) > 0)[0][0]
+        ms_selection = ms_list[ms_index]
         confs_for_pdb = ms.get_selected_confs(ms_selection)
 
         # gather initial data for REMARK section of pdb:
-        remark_data = get_pdb_remark(ms, ms_index)
+        remark_data = ms.get_pdb_remark(ms_index)
         # write the pdb in the folder
         ms_to_pdb(
-            confs_for_pdb, ms_index, mc_run, remark_data, step2_path, pdb_out_folder
+            confs_for_pdb,
+            ms_index,
+            mc_run,
+            remark_data,
+            step2_path,
+            pdb_out_folder,
+            output_pdb_format,
         )
         # pdb names: = Path(pdb_out_folder).joinpath(f"mc{mc_run}_ms{ms_index}.pdb")
 
@@ -957,6 +1126,15 @@ def generate_parser():
         action="store_false",
         help="The sort order: False : ascendingly, True : descendingly; default: %(default)s.",
     )
+
+    # TODO:
+    p.add_argument(
+        "-output_pdb_format",
+        type=str,
+        choices=["standard", "gromacs"],
+        default="standard",
+        help="The format for the output pdb file, one of ['standard', 'gromacs']; default: %(default)s.",
+    )
     p.add_argument(
         "-output_dir",
         type=str,
@@ -1027,34 +1205,26 @@ def cli_ms2pdb(argv=None):
     if args.sample_kind[0] == "r":
         kind = "random"
 
-    mc = args.MC.pop(0)
-    # use 1st MC to populate all attributes:
+    # Instantiate MS to populate all attributes, except microstates data:
     ms = MS(
         mcce_dir,
         args.pH,
         args.Eh,
-        selected_MC=mc,
         overwrite_split_files=args.overwrite_split_files,
     )
-    # write 1st batch of sampled pdbs:
-    pdbs_from_ms_samples(
-        ms,
-        mcce_dir,
-        args.sample_size,
-        sample_kind=kind,
-        ms_sort_by=args.sort_by,
-        ms_sort_reverse=args.reverse_sort,
-        output_dir=args.output_dir,
-        clear_pdbs_folder=args.clear_pdbs_folder,
-        list_files=args.list_files,
-    )
+
+    max_runs = ms.MC_RUNS
 
     while args.MC:
         mc = args.MC.pop(0)
-        # update the class attribute for MC selection:
-        ms.selected_MC = mc
+        if mc >= max_runs:
+            print(f"\tSkipped {mc=}: out of range.")
+            continue
 
-        # write another batch of sampled pdbs:
+        # update the microstate data:
+        ms.get_mc_data(mc)
+
+        # write batch of sampled pdbs:
         pdbs_from_ms_samples(
             ms,
             mcce_dir,
@@ -1062,6 +1232,9 @@ def cli_ms2pdb(argv=None):
             sample_kind=kind,
             ms_sort_by=args.sort_by,
             ms_sort_reverse=args.reverse_sort,
+            # TODO
+            pdb_format=output_pdb_format,
+            # add output format
             output_dir=args.output_dir,
             clear_pdbs_folder=args.clear_pdbs_folder,
             list_files=args.list_files,
