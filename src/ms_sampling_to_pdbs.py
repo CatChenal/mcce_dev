@@ -47,7 +47,7 @@ __doc__ = """
     > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -MC 2,3          # use Monte Carlo runs 2 and 3; default 0
     > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r # (or random), default is d
 
-    The reamining arguments are optional and will perform the action they describe only if included:
+    The remaining arguments are optional and will perform the action they describe only if included:
         --reverse_sort
         --only_create_smsm
         --overwrite_split_files
