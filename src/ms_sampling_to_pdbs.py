@@ -1,35 +1,65 @@
 #!/usr/bin/env python
 
 __doc__ = """
-MODULE `ms_sampling_to_pdbs.py` is a command-line executable module that writes a
-collection of pdb files from sampled MCCE microstates. The microstates sample size defines
-the size of the collection.
+    MODULE `ms_sampling_to_pdbs.py` is a command-line executable module that creates the sampled MCCE
+    microstates state matrix (smsm) file for each selected Monte Carlo runs, and optionally writes a
+    collection of pdb files from the smsm data.
 
-PRE-REQUISITES:
----------------
- - MCCE Step4 was run with the `--ms` flag to enable the persistence of the microstate folder, `ms_out`;
- - The folder provided at the command-line is a MCCE simulation output folder that contains the following
-   folders or files (required):
-     MCCE output:        Info extracted:
-     ...................................
-    o run.prm.record     STEP$, MONTE_T and MONTE_RUNS
-    o name.txt           Atom and cofactors renaming rules
-    o step2_out.pdb      Coordinates
-    o head3.lst          Conformer index and id, e.g. 00017, GLU-1A0007_005
-    o ms_out/            Microstates data from "msout files", e.g. ms_out/pH5eH0ms.txt
+    Note: The smsm data (.npz) file name has this format:
+          f"smsm{MC}_{size}_{k}{s}[_rev].npz"
 
-NOTE:
------
-The MCCE executable is not required for the purposes of this module.
+          - MC     index of the selected Monte Carlo run
+          - size   the sample size
+          - k      initial of the sampling kind, either "d" or "r"
+          - s      sort key (for deterministic sampling), either "e" or "c" (energy or count)
+          - [_rev] optional indicator if order is reversed (descending)
+
+          Examples:
+              smsm0_100_de.npz      # deterministic sampling of size 100 sorted by energies for MC0
+              smsm1_100_de_rev.npz  # deterministic sampling of size 100 sorted descendingly by energies for MC1
+              smsm2_100_r.npz       # random sampling of size 100 for MC2
+
+    PRE-REQUISITES:
+    ---------------
+     - MCCE Step4 was run with the `--ms` flag to enable the persistence of the microstate folder, `ms_out`;
+     - The folder provided at the command-line is a MCCE simulation output folder that contains the following
+       folders or files (required):
+         MCCE output:        Info extracted:
+         ...................................
+        o run.prm.record     STEP$, MONTE_T and MONTE_RUNS
+        o name.txt           Atom and cofactors renaming rules
+        o step2_out.pdb      Coordinates
+        o head3.lst          Conformer index and id, e.g. 00017, GLU-1A0007_005
+        o ms_out/            Microstates data from "msout files", e.g. ms_out/pH5eH0ms.txt
+
+    NOTE:
+    -----
+    The MCCE executable is not required for the purposes of this module.
+
+    USAGE:
+    -----
+    The minimal number of arguments are all the positional arguments: mcce_dir, pH, Eh, sample_size,
+    i.e.:
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99
+
+    All other arguments have default values, which can be changed by using "-<arg name>" followed by a value,
+    i.e.:
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -MC 2,3          # use Monte Carlo runs 2 and 3; default 0
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r # (or random), default is d
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r --only_create_smsm  # do not write the pdbs
 
 """
 USAGE = """
-> ms_sampling_to_pdbs.py [<arguments>]
+    The minimal number of arguments are all the positional arguments: mcce_dir, pH, Eh, sample_size,
+    i.e.:
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99
 
-Minimal number of arguments: --mcce_dir, --pH, --Eh, --sample_size
-> ms_sampling_to_pdbs.py --mcce_dir a/path/to/mcce/output --pH 7 --Eh 0 --sample_size 99
-
-"""
+    All other arguments have default values, which can be changed by using "-<arg name>" followed by a value,
+    i.e.:
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -MC 2,3          # use Monte Carlo runs 2 and 3; default 0
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r # (or random), default is d
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r --only_create_smsm  # do not write the pdbs
+    """
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import datetime
@@ -587,7 +617,7 @@ class MS:
 
         runprm = self.mcce_out.joinpath("run.prm.record")
         check_path(runprm)
-        print("Getting runprm data.")
+        print("\tGetting runprm data.")
 
         try:
             prmdata = (
@@ -611,7 +641,7 @@ class MS:
         """Populate class vars: conformers, iconf_by_confname."""
         head3_path = self.mcce_out.joinpath("head3.lst")
         check_path(head3_path)
-        print("Getting conformers data.")
+        print("\tGetting conformers data.")
         self.conformers, self.iconf_by_confname = read_conformers(head3_path)
 
         return
@@ -620,7 +650,7 @@ class MS:
         """Populate class vars: T, pH, Eh, method, fixed_iconfs, free_residues,
         free_residue_names, and ires_by_iconf from the header of the split msout file.
         """
-        print("Getting header data.")
+        print("\tGetting header data.")
         steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
 
         header_file = self.msout_file_dir.joinpath("header")
@@ -667,7 +697,7 @@ class MS:
                         for grp in fres.strip(" ;\n").split(";")
                     ]
                     if len(self.free_residues) != int(n_res):
-                        msg = "Mismatch between the number of free residues indicator"
+                        msg = "\tMismatch between the number of free residues indicator"
                         msg = (
                             msg
                             + " and the number of residues listed on the same line.\n"
@@ -690,13 +720,13 @@ class MS:
         """
         if not self.new_MC:
             if MC == self.selected_MC:
-                print(f"Same MC: {MC}")
+                print(f"\tSame MC: {MC}")
                 return
 
         if self.new_MC or MC != self.selected_MC:
             self.selected_MC = MC
 
-            print(f"Getting MC data from .npz file for MC{MC}")
+            print(f"\tGetting MC data from .npz file for MC{MC}")
 
             MC_file = self.msout_file_dir.joinpath(f"MC{self.selected_MC}")
             MC_npz = MC_file.parent.joinpath(MC_file.name + ".npz")
@@ -885,13 +915,13 @@ class MS:
         """
         if self.selected_MC is None:
             print(
-                "Run MS.get_mc_data() for a specific MC record to populate the microstates data."
+                "\tRun MS.get_mc_data() for a specific MC record to populate the microstates data."
             )
             return
         ms_calc = self.MC_NITER * (len(self.ires_by_iconf) + 1)
         if ms_calc != self.counts:
             print(
-                f"Unexpected microstates count: {self.counts = :,}, should be: {ms_calc:,}"
+                f"\tUnexpected microstates count: {self.counts = :,}, should be: {ms_calc:,}"
             )
 
         return
@@ -958,16 +988,18 @@ def get_smsm(
         only_save (bool, False): Do not return any object if True.
     """
 
-    print(f"Sampling microstates (kind: {sample_kind}) for MC{ms.selected_MC}.")
+    print(f"\tSampling microstates (kind: {sample_kind}) for MC{ms.selected_MC}.")
 
     ms_list, ms_indices, info = ms.get_sampling_params(
         n_sample_size, kind=sample_kind, sort_by=sort_by, reverse=reverse, seed=seed
     )
     k = sample_kind[0].lower()
     s = sort_by[0].lower()
+    rev = "rev" if reverse else ""
     if sample_kind.lower() == "random":
         s = ""
         ms_list = ms.microstates
+        rev = ""
 
     selection_energies = []
     top_rows = 2
@@ -988,7 +1020,11 @@ def get_smsm(
     info.append(f"{smsm.shape}")
     info.append(datetime.today().strftime("%d-%b-%y %H:%M:%S"))
     if save_to_npz:
-        npz_file = ms.msout_file_dir.joinpath(f"smsm{ms.selected_MC}_{k}{s}.npz")
+        if rev:
+            rev = "_rev"
+        npz_file = ms.msout_file_dir.joinpath(
+            f"smsm{ms.selected_MC}_{n_sample_size}_{k}{s}{rev}.npz"
+        )
         info.append(npz_file)
 
         if npz_file.exists():
@@ -1056,7 +1092,7 @@ def ms_to_pdb(
 
     file_name = Path(output_folder).joinpath(f"mc{mc_run}_ms{ms_idx}.pdb")
     if file_name.exists():
-        print(f"File already exists: {file_name}.")
+        print(f"\tFile already exists: {file_name}.")
         return
 
     # step2_out.pdb format:
@@ -1138,7 +1174,7 @@ def pdbs_from_smsm(
             save_to_npz=True,
             only_save=True,
         )
-    sleep(2)
+        sleep(2)
 
     smsm_data = load_npz(npz_file)
     info = smsm_data["info"]
@@ -1156,7 +1192,7 @@ def pdbs_from_smsm(
 
     # Summarize what's being done:
     print(
-        f"Creating n={n_sample_size:,} MCCE_PDB files in {output_dir} from (n) microstates sorted by '{sort_by}'.\n"
+        f"\tCreating n={n_sample_size:,} MCCE_PDB files in {output_dir} from n microstates sorted by '{sort_by}'.\n"
     )
 
     for c in range(smsm.shape[1]):
@@ -1181,9 +1217,9 @@ def pdbs_from_smsm(
         )
         # pdb names: = Path(pdb_out_folder).joinpath(f"mc{mc_run}_ms{ms_index}.pdb")
 
-    print("PDB files creation over.")
+    print("\tPDB files creation over.")
     if list_files:
-        print(f"Files in {pdb_out_folder}:\n")
+        print(f"\tFiles in {pdb_out_folder}:\n")
         list_folder(pdb_out_folder)
 
     return
@@ -1219,6 +1255,8 @@ def check_mcce_dir(mcce_dir):
 
 
 # ... cli ....................................................................
+
+
 def ms2pdbs_parser():
     def arg_int_or_float(x):
         """Replaces typing with Union[int, float] does not work in argparse."""
@@ -1229,49 +1267,37 @@ def ms2pdbs_parser():
             return x
 
     p = ArgumentParser(
-        prog=__name__,
+        prog="ms_sampling_to_pdbs",
         description=__doc__,
-        usage=USAGE,
         formatter_class=RawDescriptionHelpFormatter,
         epilog=">>> END of %(prog)s.",
     )
 
     p.add_argument(
-        "--mcce_dir",
+        "mcce_dir",
         type=str,
-        required=True,
         help="The folder with files from a MCCE simulation; required.",
     )
     p.add_argument(
-        "--pH",
+        "pH",
         type=arg_int_or_float,
-        required=True,
         help="The pH point; part of experiemntal variables defining a microstate; required.",
     )
     p.add_argument(
-        "--Eh",
+        "Eh",
         type=arg_int_or_float,
-        required=True,
         help="The Eh point; part of experiemntal variables defining a microstate; required.",
+    )
+    p.add_argument(
+        "sample_size",
+        type=int,
+        help="The size of the microstates sample, hence the number of pdb files to write; required",
     )
     p.add_argument(
         "-MC",
         type=list,
         default=[0],
         help="List for (zero-based) indices of the MONTERUNS to use; default: %(default)s.",
-    )
-    p.add_argument(
-        "-overwrite_split_files",
-        default=False,
-        action="store_false",
-        # help='the bar to %(prog)s (default: %(default)s)'
-        help="The MS class uses a split msout file (header and MCi files); if True the file will be split anew; default: %(default)s.",
-    )
-    p.add_argument(
-        "--sample_size",
-        type=int,
-        required=True,
-        help="The size of the microstates sample, hence the number of pdb files to write; required",
     )
     p.add_argument(
         "-sampling_kind",
@@ -1290,25 +1316,11 @@ def ms2pdbs_parser():
         'energy'-> Conf.E, 'count': Conf.count; default: %(default)s.""",
     )
     p.add_argument(
-        "-reverse_sort",
-        default=False,
-        action="store_false",
-        help="The sort order: False : ascendingly, True : descendingly; default: %(default)s.",
-    )
-    p.add_argument(
         "-seed",
+        type=int,
         default=None,
         help="The seed for random number generation. Only applies to random sampling; default: %(default)s.",
     )
-
-    # TODO:
-    # p.add_argument(
-    #    "-output_pdb_format",
-    #    type=str,
-    #    choices=["standard", "gromacs"],
-    #    default="standard",
-    #    help="The format for the output pdb file, one of ['standard', 'gromacs']; default: %(default)s.",
-    # )
     p.add_argument(
         "-output_dir",
         type=str,
@@ -1317,17 +1329,34 @@ def ms2pdbs_parser():
         defaults to mcce_dir/ms_out/msout_file_dir/pdbs_from_ms, otherwise the actual output folder
         will be: output_dir/pdbs_from_ms; default: %(default)s.""",
     )
+    # Optional arguments:
     p.add_argument(
-        "-clear_pdbs_folder",
-        default=False,
-        action="store_false",
-        help="Whether to clear an existing pdbs folder; default: %(default)s.",
+        "--reverse_sort",
+        action="store_true",
+        help="If provided: Sort descendingly, else ascendingly.",
     )
     p.add_argument(
-        "-list_files",
-        default=False,
-        action="store_false",
-        help="Whether to list the pdb files created; default: %(default)s.",
+        "--only_create_smsm",
+        action="store_true",
+        help="""If provided: Skip the creation of pdb files;only write the smsm data to .npz files
+        for the sampled ms.
+        Note: smsm :: sampled microstates state matrix for free residues.""",
+    )
+    p.add_argument(
+        "--overwrite_split_files",
+        action="store_true",
+        help="""If provided: The msout file will be split anew.
+        Note: The MS class uses a split msout file (header and MCi files).""",
+    )
+    p.add_argument(
+        "--clear_pdbs_folder",
+        action="store_true",
+        help="If provided: Clear an existing pdbs folder.",
+    )
+    p.add_argument(
+        "--list_files",
+        action="store_true",
+        help="If provided: List the pdb files created.",
     )
 
     return p
@@ -1364,8 +1393,9 @@ def cli_ms2pdb(argv=None):
 
     max_runs = ms.MC_RUNS
 
-    while args.MC:
-        mc = args.MC.pop(0)
+    args_MC = [int(i) for i in args.MC if i.isdigit()]
+    while args_MC:
+        mc = args_MC.pop(0)
         if mc >= max_runs:
             print(f"\tSkipped {mc=}: out of range.")
             continue
@@ -1373,19 +1403,30 @@ def cli_ms2pdb(argv=None):
         # update the microstate data:
         ms.get_mc_data(mc)
 
+        get_smsm(
+            ms,
+            args.sample_size,
+            kind,
+            sort_by=args.sort_by,
+            reverse=args.reverse_sort,
+            seed=args.seed,
+            save_to_npz=True,
+            only_save=True,
+        )
+        if args.only_create_smsm:
+            continue
+
         # write batch of sampled pdbs:
-        asyncio.run(
-            pdbs_from_smsm(
-                ms,
-                args.sample_size,
-                sample_kind=kind,
-                sort_by=args.sort_by,
-                sort_reverse=args.reverse_sort,
-                seed=args.seed,
-                output_dir=args.output_dir,
-                clear_pdbs_folder=args.clear_pdbs_folder,
-                list_files=args.list_files,
-            )
+        pdbs_from_smsm(
+            ms,
+            args.sample_size,
+            sample_kind=kind,
+            sort_by=args.sort_by,
+            sort_reverse=args.reverse_sort,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            clear_pdbs_folder=args.clear_pdbs_folder,
+            list_files=args.list_files,
         )
     return
 
