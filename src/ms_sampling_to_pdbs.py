@@ -141,7 +141,7 @@ def get_msout_filename(
     ms_file = f"pH{pH:.{prec_ph}f}eH{Eh:.{prec_eh}f}ms.txt"
     fname = msout_dir.joinpath(ms_file)
     if not fname.exists():
-        raise FileNotFoundError(f"File {fname} not found in {msout_dir}")
+        raise FileNotFoundError(f"File {fname.name} not found in {msout_dir}")
 
     return fname
 
@@ -156,7 +156,7 @@ def mkdir_from_msout_file(msout_file: Path) -> tuple:
     exists = msout_file_dir.exists()
     if not exists:
         Path.mkdir(msout_file_dir)
-        print(f"Created `msout_file_dir` = {msout_file_dir}")
+        print(f"\tCreated {msout_file_dir = }")
 
     return msout_file_dir, not exists
 
@@ -193,10 +193,10 @@ def check_dir_noerr(dir_path) -> bool:
 
     p = Path(dir_path)
     if not p.exists():
-        print(f"Path not found: {p}")
+        print(f"\tPath not found: {p}")
         return False
     if not p.is_dir():
-        print(f"Path is not a folder: {p}")
+        print(f"\tPath is not a folder: {p}")
         return False
 
     return True
@@ -225,17 +225,27 @@ def check_msout_split(msout_file_dir: Path, runprm_mcruns: int) -> bool:
     """Return True if the header and the MCi files exist."""
 
     if not msout_file_dir.joinpath("header").exists():
-        print(f"Split file (header) not found.")
+        # print(f"\tSplit file (header) not found.")
         return False
 
     for i in range(runprm_mcruns):
         mc = msout_file_dir.joinpath(f"MC{i}")
         mcnpz = msout_file_dir.joinpath(f"MC{i}.npz")
         if not (mc.exists() or mcnpz.exists()):
-            print(f"Split file MC{i} (or MC{i}.npz) not found.")
+            # print(f"\tSplit file MC{i} (or MC{i}.npz) not found.")
             return False
 
     return True
+
+
+def get_npz_filename(MC: int, size: int, kind: str, sort_by: str, reverse: bool) -> str:
+    k = kind[0]
+    s = sort_by[0]
+    rev = "_rev" if reverse else ""
+    if kind == "random":
+        s = ""
+        rev = ""
+    return f"smsm{MC}_{size}_{k}{s}{rev}.npz"
 
 
 def read_conformers(head_3_path: str) -> tuple:
@@ -324,18 +334,13 @@ def MC_to_npz(MC_file: str, ires_by_iconf: dict, overwrite: bool = False) -> Non
     return
 
 
-def split_msout_file(msout_fname: str, MC_RUNS: int, overwrite: bool = False):
+def split_msout_file(msout_fname: str, MC_RUNS: int):
     """Split the msout file into a "header" portion (preceeding MC:0 line) and MCi files
     for the MC records in a folder created with the name of the msout_file as per arguments.
     Note: Each file created is free of comments or blank lines.
     """
 
     msout_file_dir, created = mkdir_from_msout_file(msout_fname)
-
-    if not overwrite:
-        if not check_msout_split(msout_file_dir, MC_RUNS):
-            print("Missing some ms_out files. Set `overwrite` to True to replace them.")
-        return
 
     steps_done = {"exper": False, "method": False, "fixed": False, "free": False}
     MC_done = dict((i, False) for i in range(MC_RUNS))
@@ -581,10 +586,11 @@ class MS:
             split_msout_file(self.msout_fpath, self.MC_RUNS)
         elif self.overwrite_split_files:
             clear_folder(self.msout_file_dir)
-            split_msout_file(self.msout_fpath, self.MC_RUNS, overwrite=True)
+            split_msout_file(self.msout_fpath, self.MC_RUNS)
             self.overwrite_split_files = False
         else:
             if not check_msout_split(self.msout_file_dir, self.MC_RUNS):
+                clear_folder(self.msout_file_dir)
                 split_msout_file(self.msout_fpath, self.MC_RUNS)
                 self.overwrite_split_files = False
 
@@ -1001,13 +1007,8 @@ def get_smsm(
     ms_list, ms_indices, info = ms.get_sampling_params(
         n_sample_size, kind=sample_kind, sort_by=sort_by, reverse=reverse, seed=seed
     )
-    k = sample_kind[0].lower()
-    s = sort_by[0].lower()
-    rev = "rev" if reverse else ""
     if sample_kind.lower() == "random":
-        s = ""
         ms_list = ms.microstates
-        rev = ""
 
     selection_energies = []
     top_rows = 2
@@ -1028,11 +1029,10 @@ def get_smsm(
     info.append(f"{smsm.shape}")
     info.append(datetime.today().strftime("%d-%b-%y %H:%M:%S"))
     if save_to_npz:
-        if rev:
-            rev = "_rev"
-        npz_file = ms.msout_file_dir.joinpath(
-            f"smsm{ms.selected_MC}_{n_sample_size}_{k}{s}{rev}.npz"
+        fname = get_npz_filename(
+            ms.selected_MC, n_sample_size, sample_kind, sort_by, reverse
         )
+        npz_file = ms.msout_file_dir.joinpath(fname)
         info.append(npz_file)
 
         if npz_file.exists():
@@ -1161,16 +1161,16 @@ def pdbs_from_smsm(
     """
 
     sample_kind = sample_kind.lower()
-    k = sample_kind[0]
-    s = ""
     if sort_by is None:
         if sample_kind == "deterministic":
             sort_by = "energy"
     else:
         sort_by = sort_by.lower()
-    s = sort_by[0]
 
-    npz_file = ms.msout_file_dir.joinpath(f"smsm{ms.selected_MC}_{k}{s}.npz")
+    fname = get_npz_filename(
+        ms.selected_MC, n_sample_size, sample_kind, sort_by, sort_reverse
+    )
+    npz_file = ms.msout_file_dir.joinpath(fname)
     if not npz_file.exists():
         get_smsm(
             ms,
@@ -1384,7 +1384,7 @@ def cli_ms2pdb(argv=None):
         cli_parser.print_help()
         return
 
-    mcce_dir = Path(args.mcce_dir)
+    mcce_dir = Path(args.mcce_dir).absolute()
     check_mcce_dir(mcce_dir)
 
     kind = "deterministic"
