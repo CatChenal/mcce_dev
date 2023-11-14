@@ -1243,13 +1243,13 @@ def check_mcce_dir(mcce_dir):
     for f in ["run.prm.record", "name.txt", "head3.lst", "step2_out.pdb", "ms_out"]:
         fp = mcce_dir.joinpath(f)
         if not check_path(fp, raise_err=False):
-            raise EnvironmentError(f"MCCE output missing: {fp}.")
+            raise EnvironmentError(f"\tMCCE output missing: {fp}.")
 
     step4_done = None
     runprm = mcce_dir.joinpath("run.prm.record")
     try:
         step4_done = subprocess.check_output(
-            f"grep 'STEP4' {runprm}", stderr=subprocess.STDOUT, shell=True
+            f"grep 'STEP4' {runprm}", stderr=subprocess.STDOUT, shell=True, check=True
         ).decode()
     except CalledProcessError:
         pass
