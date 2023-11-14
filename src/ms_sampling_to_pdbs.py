@@ -1405,7 +1405,7 @@ def cli_ms2pdb(argv=None):
         args_MC = [int(i) for i in args_MC if i.isdigit()]
 
     while args_MC:
-        mc = args_MC.pop(0)
+        mc = int(args_MC.pop(0))
         if mc >= max_runs:
             print(f"\tSkipped {mc=}: out of range.")
             continue
