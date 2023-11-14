@@ -50,5 +50,13 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
     i.e.:
     > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -MC 2,3          # use Monte Carlo runs 2 and 3; default 0
     > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r # (or random), default is d
-    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 -sampling_kind r --only_create_smsm  # do not write the pdbs
+
+    The reamining arguments are optional and will perform the action they describe only if included:
+        --reverse_sort
+        --only_create_smsm
+        --overwrite_split_files
+        --clear_pdbs_folder
+        --list_files
+    i.e:
+    > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 --only_create_smsm  # create the smsm file, but not the pdbs
 ```
