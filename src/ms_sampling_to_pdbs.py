@@ -1400,8 +1400,10 @@ def cli_ms2pdb(argv=None):
     )
 
     max_runs = ms.MC_RUNS
+    args_MC = args.MC
+    if len(args_MC) > 1:
+        args_MC = [int(i) for i in args_MC if i.isdigit()]
 
-    args_MC = [int(i) for i in args.MC if i.isdigit()]
     while args_MC:
         mc = args_MC.pop(0)
         if mc >= max_runs:
