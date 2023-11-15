@@ -50,7 +50,7 @@ __doc__ = """
     The remaining arguments are optional and will perform the action they describe only if included:
         --reverse_sort
         --only_create_smsm
-        --overwrite_split_files
+        --overwrite_split_files    # use only once: remove the flag on subsequent runs
         --clear_pdbs_folder
         --list_files
     i.e:
@@ -92,6 +92,7 @@ MONTE_RUNS = 6
 VALID_MC_METHODS = [
     "MONTERUNS",
 ]
+REQUIRED_FILES = ["run.prm.record", "name.txt", "head3.lst", "step2_out.pdb", "ms_out"]
 
 # pdb remark section:
 R250 = """
@@ -198,15 +199,13 @@ def check_dir_noerr(dir_path) -> bool:
     if not p.is_dir():
         print(f"\tPath is not a folder: {p}")
         return False
-
     return True
 
 
-def check_path(filepath: str, raise_err=True) -> None:
+def check_path(filepath: str, raise_err=True) -> bool:
     """
-    Returns:
-        None if 'all clear', else error if either the parent folder
-        or the file itself does not exists.
+    Return True of False if `raise_err` is False, else None or
+    error if the path does not exists.
     """
 
     p = Path(filepath)
@@ -215,10 +214,7 @@ def check_path(filepath: str, raise_err=True) -> None:
             raise FileNotFoundError(f"Path not found: {p}")
         else:
             return False
-    if raise_err:
-        return
-    else:
-        return True
+    return True
 
 
 def check_msout_split(msout_file_dir: Path, runprm_mcruns: int) -> bool:
@@ -246,6 +242,64 @@ def get_npz_filename(MC: int, size: int, kind: str, sort_by: str, reverse: bool)
         s = ""
         rev = ""
     return f"smsm{MC}_{size}_{k}{s}{rev}.npz"
+
+
+def check_step4(runprm_path: str) -> bool:
+    """Return True if STEP4 line retrieved from run.prm.record."""
+    step4_done = False
+    try:
+        step4_done = subprocess.run(
+            f"grep 'STEP4' {runprm_path}",
+            stdout=None,
+            capture_output=False,
+            shell=True,
+            check=True,
+        )
+        step4_done = True
+    except subprocess.CalledProcessError as E:
+        raise EnvironmentError(f"Could not query run.prm.record.\n{E}")
+
+    return step4_done
+
+
+def check_mcce_dir(mcce_dir):
+    """Check the integrity of the mcce output folder:
+    0. mcce_dir/run.prm.record file exists
+    1. Step4 was run as indicated in run.prm.record
+    2. These also exist: head3.lst, step2_out.pdb, and ms_out folder
+    """
+
+    for f in REQUIRED_FILES:
+        fp = mcce_dir.joinpath(f)
+        if not check_path(fp, raise_err=False):
+            raise EnvironmentError(f"MCCE output missing: {fp}.")
+        if f == "run.prm.record":
+            check_step4(fp)
+
+    return
+
+
+def get_runprm_data(runprm_path: str):
+    """Retrieve T, MC_RUNS, MC_NITER from run.prm.record."""
+
+    try:
+        prmdata = (
+            subprocess.run(
+                f"grep -E 'MONTE_T)|MONTE_RUNS|MONTE_NITER' {runprm_path} | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
+                capture_output=True,
+                shell=True,
+                check=True,
+            )
+            .stdout.decode()
+            .splitlines()
+        )
+        T = float(prmdata[0].split()[0])
+        MC_RUNS = int(prmdata[1].split()[0])
+        MC_NITER = int(prmdata[2].split()[0])  # for counts verification, keep?
+    except subprocess.CalledProcessError as E:
+        raise EnvironmentError(f"Could not query run.prm.record.\n{E}")
+
+    return T, MC_RUNS, MC_NITER
 
 
 def read_conformers(head_3_path: str) -> tuple:
@@ -632,22 +686,7 @@ class MS:
         runprm = self.mcce_out.joinpath("run.prm.record")
         check_path(runprm)
         print("\tGetting runprm data.")
-
-        try:
-            prmdata = (
-                subprocess.check_output(
-                    f"grep -E 'MONTE_T)|MONTE_RUNS|MONTE_NITER' {runprm} | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
-                    stderr=subprocess.STDOUT,
-                    shell=True,
-                )
-                .decode()
-                .splitlines()
-            )
-            self.T = float(prmdata[0].split()[0])
-            self.MC_RUNS = int(prmdata[1].split()[0])
-            self.MC_NITER = int(prmdata[2].split()[0])  # for counts verification, keep?
-        except Exception as E:
-            raise ValueError(f"Could not query run.prm.record.\n{E}")
+        self.T, self.MC_RUNS, self.MC_NITER = get_runprm_data(runprm)
 
         return
 
@@ -1233,46 +1272,25 @@ def pdbs_from_smsm(
     return
 
 
-def check_mcce_dir(mcce_dir):
-    """Check the integrity of the mcce output folder:
-    0. mcce_dir/run.prm.record file exists
-    1. Step4 was run as indicated in run.prm.record
-    2. These also exist: head3.lst, step2_out.pdb, and ms_out folder
-    """
-
-    for f in ["run.prm.record", "name.txt", "head3.lst", "step2_out.pdb", "ms_out"]:
-        fp = mcce_dir.joinpath(f)
-        if not check_path(fp, raise_err=False):
-            raise EnvironmentError(f"\tMCCE output missing: {fp}.")
-
-    step4_done = None
-    runprm = mcce_dir.joinpath("run.prm.record")
-    try:
-        step4_done = subprocess.check_output(
-            f"grep 'STEP4' {runprm}", stderr=subprocess.STDOUT, shell=True, check=True
-        ).decode()
-    except CalledProcessError:
-        pass
-
-    if step4_done is None:
-        raise EnvironmentError(
-            "MCCE Step4 not done (missing in run.prm.record), but required."
-        )
-
-    return
-
-
 # ... cli ....................................................................
 
 
 def ms2pdbs_parser():
-    def arg_int_or_float(x):
+    def arg_int_or_float(x: str):
         """Replaces typing with Union[int, float] does not work in argparse."""
         x = float(x)
         if x.is_integer():
             return int(x)
         else:
             return x
+
+    def arg_valid_dirpath(p: str):
+        """Validate a resolved path from the command line."""
+        pa = Path(p).resolve()
+        if check_path(pa):
+            return pa
+        else:
+            return None
 
     p = ArgumentParser(
         prog="ms_sampling_to_pdbs",
@@ -1283,7 +1301,7 @@ def ms2pdbs_parser():
 
     p.add_argument(
         "mcce_dir",
-        type=str,
+        type=arg_valid_dirpath,
         help="The folder with files from a MCCE simulation; required.",
     )
     p.add_argument(
@@ -1384,8 +1402,11 @@ def cli_ms2pdb(argv=None):
         cli_parser.print_help()
         return
 
-    mcce_dir = Path(args.mcce_dir).absolute()
-    check_mcce_dir(mcce_dir)
+    if args.mcce_dir is None:
+        print("\tmcce_dir is None.")
+        sys.exit(1)
+
+    mcce_dir = args.mcce_dir
 
     kind = "deterministic"
     if args.sampling_kind[0].lower() == "r":
@@ -1398,6 +1419,7 @@ def cli_ms2pdb(argv=None):
         args.Eh,
         overwrite_split_files=args.overwrite_split_files,
     )
+    print(f"\tms instantiated using {ms}")
 
     max_runs = ms.MC_RUNS
     args_MC = args.MC

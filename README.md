@@ -54,7 +54,7 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
     The remaining arguments are optional and will perform the action they describe only if included:
         --reverse_sort
         --only_create_smsm
-        --overwrite_split_files
+        --overwrite_split_files   :: use only once: remove the flag on subsequent runs
         --clear_pdbs_folder
         --list_files
     i.e:
