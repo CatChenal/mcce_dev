@@ -250,8 +250,7 @@ def check_step4(runprm_path: str) -> bool:
     try:
         step4_done = subprocess.run(
             f"grep 'STEP4' {runprm_path}",
-            stdout=None,
-            capture_output=False,
+            stdout=subprocess.DEVNULL,
             shell=True,
             check=True,
         )
