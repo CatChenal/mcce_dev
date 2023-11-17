@@ -8,7 +8,7 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
 ### -> Provide an executable module with cli to obtain a collection of pdb files created from sampled microstates.
 ### Platforms: Linux and Linux-like
 
-#### The following documentation pertains to using the module as a comman line interface:
+#### The following documentation pertains to using the module as a command line interface:
 
 * Module __doc__ string:
 ```
