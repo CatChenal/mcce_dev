@@ -8,6 +8,8 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
 ### -> Provide an executable module with cli to obtain a collection of pdb files created from sampled microstates.
 ### Platforms: Linux and Linux-like
 
+#### The following documentation pertains to using the module as a comman line interface:
+
 * Module __doc__ string:
 ```
     MODULE `ms_sampling_to_pdbs.py` is a command-line executable module that creates the sampled MCCE
@@ -60,3 +62,36 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
     i.e:
     > ms_sampling_to_pdbs.py a/path/to/mcce/output 7 0 99 --only_create_smsm  # create the smsm file, but not the pdbs
 ```
+
+# Ad hoc installation to always use the latest update of `ms_sampling_to_pdbs` (which also enables its use programmatically):
+
+  0. Fork [mcce_dev](https://github.com/CatChenal/mcce_dev/tree/main)
+  1. Clone the fork locally.
+  2. `git pull` any update.
+  3. At the command line, run this command (You should get a path ending with /bin/mcce)[*]:
+     ```
+     > which mcce
+     ```
+  4. cd to that bin directory
+  5. Now, link the ms_sampling_to_pdbs.py module in your clone into it; Run this command:
+     ```
+      > ln -s <path to your clone>/src/ms_sampling_to_pdbs.py .
+     ```
+ * [re: 3] If you do not have the mcce executable installed, which you do not need here, use your preferred
+       /bin folder where you store scripts.
+
+
+From then on, if I push an update, you only have to
+repeat step #2.
+
+# Tutorial
+
+Once your are setup asdescribed above, you can go through the tutorial to learn more about the module, but more importantly about
+the microstates in any MCCE output folder you have, granted you have run Step 4 with the --ms_out flag.
+
+*Tutorial notebook: ./notebooks/tutorial.ipynb
+
+
+PS: That notebook is paired to a `jupytext` Markdown file: you can use it instead of the notebook in case you cannot or don't want to laynch jupyter.
+Note: It has a special header: __Disregard!__
+

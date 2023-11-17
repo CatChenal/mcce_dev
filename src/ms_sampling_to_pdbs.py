@@ -147,6 +147,46 @@ def get_msout_filename(
     return fname
 
 
+def get_npz_filename(MC: int, size: int, kind: str, sort_by: str, reverse: bool) -> str:
+    k = kind[0]
+    if k == "r":
+        s = ""
+        rev = ""
+    else:
+        s = sort_by[0]
+        rev = "_rev" if reverse else ""
+
+    return f"smsm{MC}_{size}_{k}{s}{rev}.npz"
+
+
+def get_output_filename(
+    MC: int, kind: str, sort_by: str, reverse: bool, size: Union[int,None]=None, sel_index:Union[int,None]=None, for_pdb=False) -> str:
+    """Construct the name of the smsm data .npz file (default) or that of a pdb file if `for_pdb` is True."""
+
+    k = kind[0].lower()
+    s = ""
+    rev = ""
+    if k == "d":
+        s = sort_by[0].lower()
+        rev = "_rev" if reverse else ""
+
+    if not for_pdb:
+        if size is None:
+            raise ValueError("Missing `size` for npz name.")
+        name = f"smsm{MC}_{size}_{k}{s}{rev}.npz"
+    else:
+        if sel_index is None:
+            raise ValueError("Missing `sel_index` for pdb name.")
+        name = f"mc{MC}_ms{sel_index}_{k}{s}{rev}.pdb"
+
+    """
+    print(f"{name = }")
+    name = 'smsm0_3_dc.npz'  # fine
+    name = "mc0_ms3_'.pdb"   # ??
+    """
+    return name
+
+
 def mkdir_from_msout_file(msout_file: Path) -> tuple:
     """Create a directory with the same name as msout_file w/o the extension.
     Returns:
@@ -232,16 +272,6 @@ def check_msout_split(msout_file_dir: Path, runprm_mcruns: int) -> bool:
             return False
 
     return True
-
-
-def get_npz_filename(MC: int, size: int, kind: str, sort_by: str, reverse: bool) -> str:
-    k = kind[0]
-    s = sort_by[0]
-    rev = "_rev" if reverse else ""
-    if kind == "random":
-        s = ""
-        rev = ""
-    return f"smsm{MC}_{size}_{k}{s}{rev}.npz"
 
 
 def check_step4(runprm_path: str) -> bool:
@@ -332,16 +362,14 @@ def MC_to_npz(MC_file: str, ires_by_iconf: dict, overwrite: bool = False) -> Non
     MC_file = Path(MC_file)
     MC_npz = MC_file.parent.joinpath(MC_file.name + ".npz")
 
-    delete = False
+    delete = True
     npz_exists = MC_npz.exists()
     if npz_exists:
         if not overwrite:
-            raise FileExistsError(
-                f"Found: {MC_npz}. Set `overwrite` to True to replace it."
-            )
-        else:
-            # postpone deletion after processing
-            delete = True
+            print(f"\tFound: {MC_npz}. Set `overwrite` to True to replace it.")
+            return
+    else:
+        delete = False
 
     counts = 0
     microstates = []
@@ -536,7 +564,10 @@ class Microstate:
         self.stateid = zlib.compress(" ".join([str(x) for x in state]).encode())
         self.E = E
         self.count = count
-        self.idx = idx  # needed to recover correct ms if list is sorted
+        self.idx = idx  # needed to recover correct ms if check needed
+
+    def __str__(self):
+        return f"Microstate(\n\tidx={self.idx},\n\tcount={self.count:,},\n\tE={self.E:,},\n\tstate()={self.state()}\n)"
 
     def state(self):
         return [int(i) for i in zlib.decompress(self.stateid).decode().split()]
@@ -607,7 +638,7 @@ class MS:
         mcce_output_path: str,
         pH: Union[int, float],
         Eh: Union[int, float],
-        overwrite_split_files: bool = False,
+        overwrite_split_files: bool = False
     ):
         """MS.init
 
@@ -640,12 +671,10 @@ class MS:
         elif self.overwrite_split_files:
             clear_folder(self.msout_file_dir)
             split_msout_file(self.msout_fpath, self.MC_RUNS)
-            self.overwrite_split_files = False
         else:
             if not check_msout_split(self.msout_file_dir, self.MC_RUNS):
                 clear_folder(self.msout_file_dir)
                 split_msout_file(self.msout_fpath, self.MC_RUNS)
-                self.overwrite_split_files = False
 
         self.method = ""
         self.fixed_iconfs = []
@@ -662,7 +691,7 @@ class MS:
         # above vars: populated by a call to self.get_mc_data(MC)
 
     def __repr__(self):
-        return f"""{type(self).__name__}("{self.mcce_out}", {self.pH}, {self.Eh}, overwrite_split_files={self.overwrite_split_files})"""
+        return f"{type(self).__name__}('{self.mcce_out}', {self.pH}, {self.Eh}, overwrite_split_files={self.overwrite_split_files})"
 
     @property
     def selected_MC(self):
@@ -784,7 +813,6 @@ class MS:
             MC_npz = MC_file.parent.joinpath(MC_file.name + ".npz")
             if not MC_npz.exists():
                 MC_to_npz(MC_file, self.ires_by_iconf)
-                MC_file.unlink()
 
             mc_data = np.load(MC_npz, allow_pickle=True)
             self.counts = mc_data["counts"].tolist()
@@ -795,14 +823,6 @@ class MS:
     @needs_mc
     def sort_microstates(self, by: str, reverse: bool = False) -> list:
         """Return a sorted copy of MS.microstates."""
-
-        if not by:
-            # TODO: change to breaking error?
-            print(
-                "`MS.sort_microstates` missing sort `by` parameter.",
-                "Returning MS.microstates.",
-            )
-            return self.microstates
 
         by = by.lower()
         if by not in ["energy", "count"]:
@@ -1016,7 +1036,7 @@ class MS:
 
 
 def get_smsm(
-    ms,
+    ms: MS,
     n_sample_size: int,
     sample_kind: str,
     sort_by: Union[str, None] = None,
@@ -1027,10 +1047,10 @@ def get_smsm(
 ) -> Union[np.ndarray, None]:
     """
     Return the Sampled Microstates State Matrix (smsm) for free residues as part of a tuple:
-    (info, selection_energies, smsm). If `save_to_npz` is True, the same tuple is saved into
-    a numpy `.npz` file containing these three items.
+    (info, selection_energies, smsm) if `only_save` is False (default). If `save_to_npz` is 
+    True (default), the same tuple is saved into a numpy `.npz` file.
     Args:
-        ms (MS): A MS classinstance.
+        ms (MS): A MS class instance.
         n_sample_size (int): Sample size.
         sample_kind (str, "deterministic"): Sampling kind; 'deterministic' or 'random'.
         sort_by (str or None, None): The sort key for the list of microstates.
@@ -1045,7 +1065,8 @@ def get_smsm(
     ms_list, ms_indices, info = ms.get_sampling_params(
         n_sample_size, kind=sample_kind, sort_by=sort_by, reverse=reverse, seed=seed
     )
-    if sample_kind.lower() == "random":
+    sample_kind = sample_kind.lower()
+    if sample_kind == "random":
         ms_list = ms.microstates
 
     selection_energies = []
@@ -1067,9 +1088,8 @@ def get_smsm(
     info.append(f"{smsm.shape}")
     info.append(datetime.today().strftime("%d-%b-%y %H:%M:%S"))
     if save_to_npz:
-        fname = get_npz_filename(
-            ms.selected_MC, n_sample_size, sample_kind, sort_by, reverse
-        )
+        fname = get_output_filename(
+            ms.selected_MC, sample_kind, sort_by, reverse, size=n_sample_size)
         npz_file = ms.msout_file_dir.joinpath(fname)
         info.append(npz_file)
 
@@ -1083,60 +1103,94 @@ def get_smsm(
     return info, selection_energies, smsm
 
 
-def get_ms_from_smsm(smsm_data: np.ndarray, col_index: int):
+def smsm_data_info_to_dict(smsm_data_info: np.ndarray) -> dict:
+    """Parse smsm_data["info"] into a dict."""
+
+    # selected MC run:
+    MC = int(smsm_data_info[1].split("=")[1])
+
+    # part of the info related to sampling:
+    info_0 = smsm_data_info[0].split(", ")
+
+    size = int(info_0[0].split("=")[1])
+    kind = info_0[1].split("=")[1][1:-1]
+
+    if not_random := (kind == "deterministic"):
+         by = info_0[2].split('=')[1][1:-1]
+         reverse = False if info_0[3].split("=")[1].startswith("F") else True
+    else:
+        if v := info_0[2].split("=")[1] == "None":
+            seed = None
+        else:
+            seed = int(v)
+
+    # matrix shape:
+    smsm_shape = tuple(int(i) for i in smsm_data_info[2][1:-1].split(", "))
+
+    if not_random:
+        return dict([("MC",MC),
+                     ("size",size),
+                     ("kind",kind),
+                     ("by",by),
+                     ("reverse",reverse),
+                     ("smsm_shape",smsm_shape),
+                     ("smsm_date",smsm_data_info[3]),
+                     ("smsm_data_file",smsm_data_info[4])])
+    else:
+        return dict([("MC",MC),
+             ("size",size),
+             ("kind",kind),
+             ("seed",seed),
+             ("smsm_shape",smsm_shape),
+             ("smsm_date",smsm_data_info[3]),
+             ("smsm_data_file",smsm_data_info[4])])
+
+
+def get_ms_from_smsm(ms: MS, smsm_data: np.ndarray, col_index: int):
     """Retrieve a column from the smsm matrix as a Microstate object.
     Args:
+        ms (MS): a MS instance
         smsm_data (np.ndarray): data from npz file or `get_smsm`.
     """
 
-    sampling_info = smsm_data["info"][0].split(", ")
-    if "deterministic" in sampling_info[1]:
-        lst = [info.split("=")[1] for info in sampling_info]
-        sort_by = lst[2][1:-1]
-        if lst[3] == "False":
-            reverse = False
-        else:
-            reverse = True
-        ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
+    info_dict = smsm_data_info_to_dict(smsm_data["info"])
+    if info_dict["kind"] == "deterministic":
+        ms_list = ms.sort_microstates(by=info_dict["by"],
+                                      reverse=info_dict["reverse"])
     else:
         ms_list = ms.microstates
 
-    sel_index = smsm_data["smsm"][0, col_index]
+    smsm = smsm_data["smsm"]
+    sel_index = smsm[0, col_index]
 
-    return ms_list[smsm[:, col_index]]
+    return ms_list[sel_index]
 
 
 def ms_to_pdb(
     selected_confs: list,
-    ms_idx: int,
-    mc_run: int,
     remark_data: str,
     step2_path: str,
-    output_folder: str,
-    output_pdb_format: str,
+    pdb_pathname: str,
 ) -> None:
     """Create a new pdb file in `output_folder` from the `selected_confs`
     Args:
         selected_confs (list): List of selected conformers.
-        ms_idx (int): The selected ms.idx (creation index), part of output pdb filename.
-        mc_run (int): Index of MC record used, part of output pdb filename.
         remark_data (str): Used to create pdb REMARK 250 section to provide
                            experimental data (T, PH, EH, METHOD) that can be
                            prepended into a pdb.
         step2_path (str): path to step2_out.pdb.
-        output_folder (str): path to folder for pdb created from selected_ms.
-        output_pdb_format (str, ): PDB format to use when writing the output pdb;
-            one of ["standard", "gromacs", "amber"].
+        pdb_pathname (str): the pdb filepath to write
 
     Returns:
-        None: The created file names format is f"mc{mc_run}_ms{ms_idx}.pdb".
+        None: The format of the pdb file name in `pdb_pathname` is: f"mc{MC}_ms{sel_index}_{k}{s}{rev}.pdb",
+              see `get_pdb_filename`.
 
     Pre-requisites:
         The user must acertain that the `selected_confs` come from the same MCCE output files directory
         as the one provided in `step2_path`.
     """
 
-    file_name = Path(output_folder).joinpath(f"mc{mc_run}_ms{ms_idx}.pdb")
+    file_name = Path(pdb_pathname)
     if file_name.exists():
         print(f"\tFile already exists: {file_name}.")
         return
@@ -1205,8 +1259,8 @@ def pdbs_from_smsm(
     else:
         sort_by = sort_by.lower()
 
-    fname = get_npz_filename(
-        ms.selected_MC, n_sample_size, sample_kind, sort_by, sort_reverse
+    fname = get_output_filename(
+            ms.selected_MC, sample_kind, sort_by, sort_reverse, size=n_sample_size
     )
     npz_file = ms.msout_file_dir.joinpath(fname)
     if not npz_file.exists():
@@ -1223,9 +1277,19 @@ def pdbs_from_smsm(
         sleep(2)
 
     smsm_data = load_npz(npz_file)
+    print(f"\tReading {npz_file}")
+
     info = smsm_data["info"]
     selection_energies = smsm_data["sel_energies"]
     smsm = smsm_data["smsm"]
+
+    info_dict = smsm_data_info_to_dict(smsm_data["info"])
+    MC = info_dict["MC"]
+    kind = info_dict["kind"]
+    by, reverse = "", False
+    if kind == "deterministic":
+        by = info_dict["by"]
+        reverse = info_dict["reverse"]
 
     step2_path = ms.mcce_out.joinpath("step2_out.pdb")
     if not output_dir or output_dir is None:
@@ -1252,16 +1316,18 @@ def pdbs_from_smsm(
         confs_for_pdb = ms.confnames_by_iconfs(all_iconfs)
 
         # write the pdb in the folder
+        pdb_name = get_output_filename(MC, kind, by, reverse, sel_index=sel_index, for_pdb=True)
+        pdb_path = pdb_out_folder.joinpath(pdb_name)
+        if pdb_path.exists():
+            print(f"\tFile already exists: {pdb_path}.")
+            continue
+
         ms_to_pdb(
             confs_for_pdb,
-            sel_index,
-            info[1].split("=")[1],
             remark_data,
             step2_path,
-            pdb_out_folder,
-            output_pdb_format,
+            pdb_path
         )
-        # pdb names: = Path(pdb_out_folder).joinpath(f"mc{mc_run}_ms{ms_index}.pdb")
 
     print("\tPDB files creation over.")
     if list_files:
