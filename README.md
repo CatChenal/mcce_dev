@@ -4,7 +4,7 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
 
 # Current projects:
 
-## ms_sampling_to_pdb
+## ms_sampling_to_pdbs
 ### -> Provide an executable module with cli to obtain a collection of pdb files created from sampled microstates.
 ### Platforms: Linux and Linux-like
 
