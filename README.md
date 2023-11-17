@@ -68,7 +68,7 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
   0. Fork [mcce_dev](https://github.com/CatChenal/mcce_dev/tree/main)
   1. Clone the fork locally.
   2. `git pull` any update.
-  3. At the command line, run this command (You should get a path ending with /bin/mcce)[*]:
+  3. At the command line, run this command (You should get a path ending with /bin/mcce)[+]:
      ```
      > which mcce
      ```
@@ -77,7 +77,7 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
      ```
       > ln -s <path to your clone>/src/ms_sampling_to_pdbs.py .
      ```
- * [re: 3] If you do not have the mcce executable installed, which you do not need here, use your preferred
+ + [re: 3] If you do not have the mcce executable installed, which you do not need here, use your preferred
        /bin folder where you store scripts.
 
 
@@ -86,12 +86,12 @@ repeat step #2.
 
 # Tutorial
 
-Once your are setup asdescribed above, you can go through the tutorial to learn more about the module, but more importantly about
+Once your are setup as described above, you can go through the tutorial to learn more about the module, but more importantly about
 the microstates in any MCCE output folder you have, granted you have run Step 4 with the --ms_out flag.
 
-*Tutorial notebook: ./notebooks/tutorial.ipynb
+* __Tutorial notebook__: ./notebooks/tutorial.ipynb
 
 
-PS: That notebook is paired to a `jupytext` Markdown file: you can use it instead of the notebook in case you cannot or don't want to laynch jupyter.
-Note: It has a special header: __Disregard!__
+__PS__: That notebook is paired to a `jupytext` Markdown file: you can use it instead of the notebook in case you cannot or don't want
+to launch jupyter. Note: It has a special header: __Disregard!__
 
