@@ -72,8 +72,8 @@ Project for ancillary development of [Stable-MCCE repo](https://github.com/Gunne
      ```
      > which mcce
      ```
-     Alternatively, you can use any other bin folder &mdash; e.g. usr/local/bin &mdash; as the mcce excecutable is not required for this project.
-  4. cd to that bin directory
+     Alternatively, you can use any other bin folder &mdash; e.g. usr/local/bin &mdash; as the mcce executable is not required for this project.
+  4. `cd` to that bin directory
   5. Soft-link the ms_sampling_to_pdbs.py module of your clone into it; Run this command:
      ```
       > ln -s <path to your clone>/src/ms_sampling_to_pdbs.py .
@@ -87,8 +87,10 @@ repeat step #2.
 Once your are setup as described above, you can go through the tutorial to learn more about the module, but more importantly about
 the microstates in any MCCE output folder you have, granted you have run Step 4 with the --ms_out flag.
 
-* [__Tutorial notebook__](https://github.com/CatChenal/mcce_dev/blob/main/notebooks/tutorial.ipynb)
-* [__Tutorial markdown__](https://github.com/CatChenal/mcce_dev/blob/main/notebooks/tutorial.md)
-   - NOTE: The `tutorial.md` file is a `jupytext` Markdown file paired to the notebook: you can use it instead of the notebook in case you cannot or don't want
+* [__Tutorial (notebook)__](https://github.com/CatChenal/mcce_dev/blob/main/notebooks/tutorial.ipynb)
+* [__Tutorial (markdown)__](https://github.com/CatChenal/mcce_dev/blob/main/notebooks/tutorial.md)
+   - Note: The `tutorial.md` file is a `jupytext` Markdown file paired to the notebook: you can use it instead of the notebook in case you cannot or don't want
 to launch jupyter, however you need to disregard its special header section which is used for synchronizing.
 
+# Problem? -> Issue
+Please, open an issue if you encounter any problem.
