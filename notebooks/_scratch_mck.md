@@ -13,8 +13,6 @@ jupyter:
     name: conda-env-mce-py
 ---
 
-_Cell 1: from jupyterlab template_: run it
-
 ```python jupyter={"source_hidden": true}
 import sys
 from pathlib import Path
@@ -67,516 +65,683 @@ def fdir(obj, start_with_str='_', exclude=True):
 
 ```
 
-_Cell 2: from jupyterlab template_: run it
-
-```python
+```python jupyter={"source_hidden": true}
 # Insert current src dir into sys.path so that modules in ../src can be imported:
 # CHANGE THIS IF NEEDED:
 
 add_to_sys_path(Path.cwd(), up=True)
 ```
 
-```python
-DATA = Path.cwd().parent.joinpath("data")
-if DATA.exists():
-    DATA
-else:
-    print(f"Not found: {DATA}")
-```
-
-```python
-mcce_dir = DATA.joinpath("4lzt")
-mcce_dir
-msout_dir = mcce_dir.joinpath("ms_out")
-!ls -l {msout_dir}
-
-runprm = mcce_dir.joinpath("run.prm.record")
-runprm2 = runprm.relative_to(Path.cwd().parent)  # use when running from this nbk
-```
-
-```python
-import ms_sampling_to_pdbs as sampling
-import subprocess
-```
-
-```python
-#fdir(sampling)
-```
-
 ---
 # Test executable module
 
 ```python
-which = msout_dir
-which = msout_dir.joinpath("pH6eH0ms")
-!ls -l {which}
+from functools import partial
+import subprocess
+
+import ms_sampling_to_pdbs as sampling
+
+load_npz = partial(np.load, allow_pickle=True)
+save_npz = partial(np.savez, allow_pickle=True)
 ```
 
 ```python
+HERE = Path.cwd()  # do not change
+
+test_folder = "granepura_GunnerLab/mcce_data" # you can change this to any other mcce folder
+mcce_dir = HERE.parent.parent.joinpath(test_folder)  # do not change
+mcce_dir, mcce_dir.exists()
+```
+
+<!-- #raw jupyter={"source_hidden": true} -->
 mcce_dir = DATA.joinpath("4lzt")
 mcce_dir
-pH = 6.0
+mcce_dir = Path("../data/4lzt").resolve()
+mcce_dir
+
+nametxt = mcce_dir.joinpath("name.txt")
+runprm = mcce_dir.joinpath("run.prm.record")
+runprm2 = runprm.relative_to(Path.cwd().parent)  # use when running subprocesses from this nbk
+
+msout_dir = mcce_dir.joinpath("ms_out")
+!ls -l {msout_dir}
+<!-- #endraw -->
+
+<!-- #raw -->
+Markdown(filename="../README.md")
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+TEST_DIR = Path.cwd().parent.joinpath("tests")
+TEST_DIR
+
+test_runprm = TEST_DIR.joinpath("run.prm.record")
+<!-- #endraw -->
+
+```python
+pH = 7.0
 Eh= 0.0
+overwrite = False
+
+ms = sampling.MS(mcce_dir,pH, Eh, overwrite_split_files = overwrite)
+ms.T, ms.MC_RUNS
 ```
 
 ```python
-ms = sampling.MS(mcce_dir,pH, Eh)
+ms.get_mc_data(0)
+print(f"{ms.counts = :,}; {ms.MC_RUNS = :,}")
+
+print(f"{len(ms.microstates) = :,}")
 ```
 
 ```python
-#fdir(ms)
+#which = msout_dir.joinpath("pH6eH0ms")
+!ls -l {ms.msout_file_dir}
 ```
 
 ```python
-n_ires = len(ms.ires_by_iconf)
-print("n_ires = len(ms.ires_by_iconf) = ", n_ires)
-n_confs = len(ms.conformers)
-print("n_confs = len(ms.conformers) = ", n_confs)
-n_fixed = len(ms.fixed_iconfs)
-print("n_fixed = len(ms.fixed_iconfs) = ", n_fixed)
-free_confs = n_confs - n_fixed
-print("free_confs = n_confs - n_fixed = ", free_confs)
-n_free = len(ms.free_residues)
-print("n_free = len(ms.free_residues) = ", n_free)
-
-print(f"{ms.MC_RUNS = }, {ms.MC_NITER = :,}")
-print(f"{ms.counts = :,}")
-
-print(f"{ms.MC_NITER * ms.MC_RUNS * n_confs  = :,}")
-print(f"{ms.MC_NITER * ms.MC_RUNS * free_confs = :,}")
-print(f"{ms.MC_NITER * ms.MC_RUNS * n_ires = :,}")
-print(f"{ms.MC_NITER * ms.MC_RUNS * n_fixed = :,}")
-print(f"{ms.MC_NITER * ms.MC_RUNS * n_free = :,}")
+print(ms)
+ms.mcce_out
+ms.msout_file_dir
+ms.msout_fpath
+ms.msout_fpath.name
 ```
 
 ```python
-n_counts = 0.0
-ms_count_values = []
 
-ms_list = ms.sort_microstates(by="energy")
-
-for mc in ms_list:
-    # n_counts += ms[1]
-    # ms_count_values.append(ms[1])
-    n_counts += mc.count
-    ms_count_values.append(mc.count)
-
-n_counts = ms.counts
-ms_cumsum = np.cumsum([mc.count for mc in ms_list])
-
-ms.counts
-n_counts
-ms_cumsum[-1]
-ms_cumsum2[-1]
-len(ms.microstates)
-len(ms_count_values)
 ```
 
-```python
-def sample_microstates(
-    ms: MS,
-    size: int,
-    kind: str = "deterministic",
-    sort_by: str = "energy",
-    reverse: bool = False,
-) -> tuple:
+# Check output of  sampling
+
+<!-- #raw jupyter={"source_hidden": true} -->
+#ok
+
+mc_run = ms.selected_MC  # part of pdb name
+mc_run
+
+n_sample_size = 4
+sample_kind = "deterministic"
+ms_sort_by = "energy"
+output_pdb_format = "mcce"  # not implemented, no effect
+
+if ms.sampled_cumsum is None:
+    ms.get_sampling_params(n_sample_size,
+                           kind=sample_kind,
+                           sort_by=ms_sort_by
+                           )
+
+if ms.sampled_ms is None:
+    ms_list = ms.microstates
+else:
+    ms_list = ms.sampled_ms
+
+#...................................................
+step2_path = ms.mcce_out.joinpath("step2_out.pdb")
+pdb_out_folder = Path.cwd()
+if pdb_out_folder.name != "pdbs_from_ms":
+    pdb_out_folder = pdb_out_folder.joinpath("pdbs_from_ms")
+
+if not pdb_out_folder.exists():
+    Path.mkdir(pdb_out_folder)
+#...................................................
+
+for c in ms.sampled_count_selection:
+    ms_index = np.where((ms.sampled_cumsum - c) > 0)[0][0]
+    ms_selection = ms_list[ms_index]
+
+    confs_for_pdb = ms.get_selected_confs(ms_selection)
+
+    # gather initial data for REMARK section of pdb:
+    remark_data = ms.get_pdb_remark(ms_index)
+    # write the pdb in the folder
+    sampling.ms_to_pdb(confs_for_pdb, ms_index, mc_run,
+                       remark_data, step2_path,
+                       pdb_out_folder, output_pdb_format)
+
+confs_for_pdb[:6]
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+                if not steps_done["free"]:
+                    n_res, fres = line.split(":")
+                    self.free_residues = [
+                        [int(n) for n in grp.strip().split()]
+                        for grp in fres.strip(" ;\n").split(";")
+                    ]
+                    if len(self.free_residues) != int(n_res):
+                        msg = "Mismatch between the number of free residues indicator"
+                        msg = (
+                            msg
+                            + " and the number of residues listed on the same line.\n"
+                        )
+                        raise ValueError(msg + f"\t{line}")
+
+                    self.free_residue_names = [
+                        self.conformers[g[0]].resid for g in self.free_residues
+                    ]
+                    for i, res in enumerate(self.free_residues):
+                        for iconf in res:
+                            self.ires_by_iconf[iconf] = i
+                    steps_done["fee"] = True
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+# from jj_ms_analysis.py
+
+def convert_to_subset_ms(self, res_of_interest):
+    """What does this do?
     """
-    Implement a sampling of MS.microstates depending on `kind`.
-    Args:
-        ms (MS): An instance of the MS class.
-        size (int): sample size
-        kind (str, 'deterministic'): Sampling kind: one of ['deterministic', 'random'].
-            If 'deterministic', the microstates in ms_list are sorted then sampled at
-            regular intervals otherwise, the sampling is random. Case insensitive.
-        sort_by (str, "energy"): Only applies if kind is "deterministic".
-        reverse (bool, False): Only applies if kind is "deterministic".
-    Returns:
-        A 3-tuple: cumsum of MC.count in ms.microstates,
-                   array of indices for selection,
-                   ms_list?
-    """
+    iconfs_of_interest = []
 
-    kind = kind.lower()
-    if kind not in ["deterministic", "random"]:
-        raise ValueError(
-            f"Values for `kind` are 'deterministic' or 'random'; Given: {kind}"
+    for ires, res in enumerate(res_of_interest):
+        if res in self.free_residue_names:
+            conf_select = self.free_residues[ires]
+        else:  # this reside is fixed on one or more conformers
+            i_fixed = fixed_resnames.index(res)
+            conf_select = [self.fixedconfs[i_fixed]]
+
+        iconfs_of_interest.append(conf_select)  # a list of list
+
+    # prepare a list of free residues for grouping microstates
+    i_free_res_of_interest = [self.ires_by_iconf[iconfs[0]]
+                             for iconfs in iconfs_of_interest
+                             if len(iconfs) > 1
+                             ]
+    subset_ms_by_id = {}
+    for ms in self.microstates:
+        current_sub_state = [ms.state()[i] for i in i_free_res_of_interest]
+        sub_stateid = zlib.compress(
+            " ".join([str(x) for x in current_sub_state]).encode()
         )
-    if kind == "deterministic":
-        if (sort_by is None) or (sort_by == "energy"):
-            sort_by = "E"
-        else:
-            sort_by = sort_by.lower()
-            if sort_by not in ["energy", "count"]:
-                raise ValueError(f"Values for `sort_by` are 'energy' or 'count'; Given: {by}")
+        sub_ms = Subset_Microstate(sub_stateid, ms.E * ms.count, ms.count)
 
+        if sub_stateid in subset_ms_by_id:
+            subset_ms_by_id[sub_stateid].count += sub_ms.count
+            subset_ms_by_id[sub_stateid].total_E += sub_ms.total_E
+        else:
+            subset_ms_by_id[
+                sub_stateid
+            ] = sub_ms  # create a new key value pair to store this ministate
+
+    subset_microstates = []
+    for sub_stateid in subset_ms_by_id:
+        sub_ms = subset_ms_by_id[sub_stateid]
+        sub_ms.E = sub_ms.average_E = sub_ms.total_E / sub_ms.count
+        subset_microstates.append(sub_ms)
+
+    return subset_microstates
+<!-- #endraw -->
+
+<!-- #raw -->
+h3 = mcce_dir.joinpath("head3.lst")
+s2 = mcce_dir.joinpath("step2_out.pdb")
+!head -n 20 {h3}
+<!-- #endraw -->
+
+<!-- #raw -->
+!head -n 200 {s2} | tail -n 20
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+    for ires, res in enumerate(res_of_interest):
+        if res in self.free_residue_names:
+            conf_select = self.free_residues[ires]
+        else:  # this reside is fixed on one or more conformers
+            i_fixed = fixed_resnames.index(res)
+            conf_select = [self.fixedconfs[i_fixed]]
+
+        iconfs_of_interest.append(conf_select)  # a list of list
+
+    # prepare a list of free residues for grouping microstates
+    i_free_res_of_interest = [self.ires_by_iconf[iconfs[0]]
+                             for iconfs in iconfs_of_interest
+                             if len(iconfs) > 1
+                             ]
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+mc_run = ms.selected_MC  # part of pdb name
+mc_run
+
+n_sample_size = 4
+sample_kind = "deterministic"
+ms_sort_by = "energy"
+
+if ms.sampled_cumsum is None:
+    ms.get_sampling_params(n_sample_size,
+                           kind=sample_kind,
+                           sort_by=ms_sort_by
+                           )
+
+if ms.sampled_ms is None:
+    ms_list = ms.microstates
+else:
+    ms_list = ms.sampled_ms
+
+
+all_confs = ms.get_selected_confs(ms.microstates[0])
+for i, c in enumerate(all_confs):
+    if i >=8:
+        break
+    print(c[0], c[1])
+
+ms.free_residue_names[:4]
+ms.free_residues[:4]
+
+#len(ms.ires_by_iconf) #273
+for i, kv in enumerate(ms.ires_by_iconf.items()):
+    if i >= 8:
+        break
+    print(kv)
+<!-- #endraw -->
+
+<!-- #raw jupyter={"source_hidden": true} -->
+def get_ms_from_smsm(smsm_data: np.ndarray, sel_index: int):
+    """
+    Retrive a column from the smsm matrix as a Microstate object.
+    Args:
+        smsm_data (np.ndarray): data from npz file.
+    """
+
+    sampling_info = smsm_data["info"][0].split(", ")
+    if "deterministic" in sampling_info[1]:
+        lst = [info.split("=")[1] for info in sampling_info]
+        sort_by = lst[2][1:-1]
+        if lst[3] == "False":
+            reverse = False
+        else:
+            reverse = True
         ms_list = ms.sort_microstates(by=sort_by, reverse=reverse)
     else:
         ms_list = ms.microstates
 
-    ms_cumsum = np.cumsum([mc.count for mc in ms_list])
+    smsm = smsm_data["smsm"]
+    col_index = smsm[0,:].tolist().index(sel_index)
 
-    if kind == "deterministic":
-        X = ms.counts - size
-        Y = ms.counts / size
-        count_selection = np.arange(size, X, Y)
-    else:
-        rng = np.random.default_rng()
-        count_selection = rng.integers(low=1, high=n_counts + 1, size=size)
-
-    return ms_cumsum, count_selection, ms_list
-```
-
-```python
-
-```
-
-```python
-
-```
-
-# Getters and Setters
-
-<!-- #raw jupyter={"source_hidden": true} -->
-# this works; __eq__ and _hash_ needed for lru_cache
-from functools import lru_cache
-
-class Point:
-
-    def __init__(self, x, y, MC = 0):
-        self.x = x
-        self.y = y
-        self.RUNS = 6
-        self._selected_MC = MC
-        self.do_something_with_MC()
-
-    @property
-    def selected_MC(self):
-        return self._selected_MC
-
-    @selected_MC.setter
-    def selected_MC(self, value):
-        if value >= self.RUNS:
-             print(f"This value is beyond the range of MONTE_RUNS({RUNS}) used in this simulation: {value}.")
-        else:
-            self._selected_MC = value
-            self.do_something_with_MC()
-
-    def __eq__(self, other):
-        return self.selected_MC == other.selected_MC
-
-    def __hash__(self):
-        return hash(self.selected_MC)
-
-    def __repr__(self):
-        return f"Point({self.x=}, {self.y=}, {self.selected_MC=})"
-
-    @lru_cache(maxsize=None)
-    def do_something_with_MC(self):
-        print(f"do_something with {self.selected_MC=}")
+    return ms_list[smsm[0,col_index]]
 
 
-print("init")
-p = Point(1,2)
-p
+def get_smsm(ms,
+             n_sample_size: int,
+             sample_kind: str,
+             sort_by: Union[str, None] = None,
+             reverse = False,
+             seed = None,
+             save_to_npz = False) -> np.ndarray:
+    """
+    Return the Sampled Microstates State Matrix (smsm) for free residues as part of a tuple:
+    (info, selection_energies, smsm). If `save_to_npz` is True, the same tuple is saved into
+    a numpy `.npz` file containing these three items.
+    """
 
-print("selected_MC -> 5")
-p.selected_MC = 5
-p
+    print(f"Sampling microstates (kind: {sample_kind}) for MC{ms.selected_MC}.")
 
-print("selected_MC -> 6")
-p.selected_MC = 6
-p
+    ms_list, ms_indices, info = ms.get_sampling_params(n_sample_size,
+                                                         kind = sample_kind,
+                                                         sort_by = sort_by,
+                                                         reverse = reverse,
+                                                         seed = seed
+                                                         )
+    k = sample_kind[0].lower()
+    s = sort_by[0].lower()
+    if sample_kind.lower() == "random":
+        s = ""
+        ms_list = ms.microstates
 
-print("selected_MC -> 1")
-p.selected_MC = 1
-p
+    selection_energies = []
+    top_rows = 2
+    smsm = np.ones((len(ms.free_residues) + top_rows, n_sample_size), dtype=int) * -1
+
+    for i, x in enumerate(ms_indices):
+        sampled_ms = ms_list[x]
+        selected_iconfs = ms.get_selected_confs(sampled_ms,
+                                                output_val="iconf",
+                                                include_fixed = False)
+        smsm[0, i] = x                 # row 0 :: ms selection index
+        smsm[1, i] = sampled_ms.idx    # row 1 :: selected_ms.idx
+        selection_energies.append(sampled_ms.E)
+
+        for r, iconf in enumerate(selected_iconfs, start=2):
+            smsm[r, i] = iconf
+
+    info.append(f"{smsm.shape}")
+    info.append(datetime.today().strftime("%d-%b-%y %H:%M:%S"))
+    if save_to_npz:
+        npz_file = ms.msout_file_dir.joinpath(f"smsm{ms.selected_MC}_{k}{s}.npz")
+        info.append(npz_file)
+
+        if npz_file.exists():
+            npz_file.unlink()
+
+        save_npz(npz_file, info = info, sel_energies = selection_energies, smsm=smsm)
+
+    return  info, selection_energies, smsm
 <!-- #endraw -->
 
-<!-- #raw jupyter={"source_hidden": true} -->
-# this works
-
-RUNS = 6
-
-class Point:
-    x_values = set()
-    new_x = False
-
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-    def __getattr__(self, name: str):
-        return self.__dict__[f"_{name}"]
-
-    def __setattr__(self, name, value):
-        if name == "x":
-            if value in range(RUNS):
-                if value not in Point.x_values:
-                    Point.new_x = True
-                else:
-                    Point.new_x = False
-                Point.x_values.add(value)
-            else:
-                print(f"This value is beyond the range of MONTE_RUNS({RUNS}) used in this simulation: {value}.")
-
-        self.__dict__[f"_{name}"] = float(value)
-
-    def __repr__(self):
-        return f"Point({self.x=}, {self.y=})"
-
-
-p = Point(1,2)
-
-p.x, p.y
-p.x_values
-p.__dict__
-
-p.x = 6
-p.y = 10
-
-p.x, p.y
-p.x_values
-p.__dict__
-<!-- #endraw -->
-
-<!-- #raw jupyter={"source_hidden": true} -->
-# this works too but unwielding: must call a get_/set_x fn for every assignment
-
-class Person:
-    def __init__(self, name, birth_date):
-        self._name = name
-        self._birth_date = birth_date
-        self._changes = []
-
-    def get_name(self):
-        return self._name
-
-    def set_name(self, value):
-        if self._name != value:
-            self._name = value
-            self._changes.append(("name",value))
-            self.do_this(self._name)
-
-    def get_changes(self):
-        return self._changes
-
-    def get_birth_date(self):
-        return self._birth_date
-
-    def set_birth_date(self, value, force=False):
-        if self._birth_date != value:
-            if not force:
-                raise AttributeError("can't set birth_date")
-            self._birth_date = value
-            self._changes.append(("birth_date",value))
-            self.do_this(self._birth_date)
-
-    def do_this(self, attrname):
-        print(f"I'm doing this for {attrname}")
-
-class Employee(Person):
-    def get_name(self):
-        return super().get_name().upper()
-
-    def get_birth_date(self):
-        return super().get_birth_date()
-
-    def get_changes(self):
-        return super()._changes
-
-# examples
-
-jane = Person("Jane Doe", "2000-11-29")
-jane.get_name()
-jane.get_birth_date()
-
-jane.set_birth_date("2000-10-29", force=True)
-jane.get_birth_date()
-jane.get_changes()
-
-jane.set_name("Jane Poe")
-jane.get_name()
-jane.get_changes()
-
-jane.set_birth_date("2000-10-29", force=True)
-jane.get_birth_date()
-jane.get_changes()
-<!-- #endraw -->
-
----
-
----
-
-# MCCE - MS Sampling (using test data in ../tests/data/)
----
-
 ```python
-import base
-import mcce_io as io
-import ms_sampling as sampling
-```
-
-```python
-DATA = Path.cwd().parent.joinpath("tests/data")
-DATA
-```
-
-```python
-!ls {DATA}
-```
-
-```python
-# filepaths of inputs used by MS class:
-h3_path = DATA.joinpath("head3.lst")
-mcce_output_path = h3_path.parent
-mcce_output_path
-
-step2_path = mcce_output_path.joinpath("step2_out.pdb")
-msout_path = mcce_output_path.joinpath("ms_out")
-msout_path, msout_path.is_dir()
-```
-
-```python
-opath = None
-(not opath) or opath is None
-```
-
-```python
-# filepaths of outputs:
-
-pH = 5.0
-Eh= 0.0
-msout_file = io.get_msout_filename(mcce_output_path, pH, Eh)
-msout_file
-
-msout_file_dir = msout_file.parent.joinpath(msout_file.stem)
-msout_file_dir
-```
-
-```python
-start_time = time.time()
-
-io.split_msout_file(mcce_output_path, pH, Eh)
-
-end_time = time.time()
-print("io.divide_msout_file() took {:.2f} mins".format((end_time - start_time)/60))
-```
-
-```python
-!ls {msout_file_dir}
-```
-
-```python
-pdbs_dir = msout_file_dir.joinpath("pdbs_from_ms")
-```
-
-```python
-!ls {pdbs_dir}
-```
-
-<!-- #raw -->
-io.clear_folder(pdbs_dir)
-!ls {pdbs_dir}
-<!-- #endraw -->
-
-# base.MC class
-
-```python
-print(base.MS.__doc__)
-print(base.MS.__init__.__doc__)
-```
-
-```python
-# create instance
-start_time = time.time()
-
-ms = base.MS(mcce_output_path, pH, Eh)
-
-d = time.time() - start_time
-print(f"Loading of base.MS instance took {d/60:.2f} mins or {d:.2f} seconds")
-print(ms)
-```
-
-```python
-# Public vars in MC:
-fdir(ms)
-```
-
-```python
-print(f"ms.counts : {ms.counts:,}")
-```
-
-# ms_sampling module
-
-```python
-fdir(sampling)
+ms.free_residue_names[:10]
 ```
 
 ```python
 n_sample_size = 4
+sample_kind =  "deterministic"
 ms_sort_by = "energy"
-output_dir = msout_file_dir
-mc_run = ms.selected_MC  # part of pdb name
-mc_run
+save = True
+
+info, selection_energies, smsm = sampling.get_smsm(ms, n_sample_size, sample_kind, ms_sort_by, save_to_npz=save)
+info
 ```
 
-<!-- #raw jupyter={"source_hidden": true} -->
-# check on diff out with diff sort roder: ok
-ms_sort_by = "energy"
-e_sorted_ms_list = sampling.sort_microstate_list(ms.microstates, by=ms_sort_by)
-e_ms_cumsum, e_count_selection = sampling.sample_microstates(n_sample_size, e_sorted_ms_list)
-len(e_ms_cumsum), len(e_count_selection)
-e_count_selection
-assert max(e_ms_cumsum) == ms.counts
+```python
+fname = sampling.get_output_filename(ms.selected_MC,
+                                     sample_kind,
+                                     ms_sort_by,
+                                     False,
+                                     size=n_sample_size)
+d_npz_file = ms.msout_file_dir.joinpath(fname)
+smsm_data = load_npz(d_npz_file)
+info_dict = sampling.smsm_data_info_to_dict(smsm_data["info"])
+info_dict
+```
+
+```python
+len("MET01A0001_002")
+xx = 467.14
+repr(xx)
+sx = f"{xx:,.2f}"
+sx
+```
+
+```python
+sel_indices = smsm_data["selection_indices"]
+sel_energies = smsm_data["selection_energies"]
+res_names = smsm_data["residue_names"]
+smsm = smsm_data["smsm"]
+
+#hdr = f"RESIDUE   | " + "".join([f"{x:<15}" for x in sel_indices])
+#hdr = f"RESIDUE   | " + " ".join([f"{x:>14,.2f}" for x in sel_energies])
+#print(hdr)
+#print("_" * len(hdr))
+
+for r in range(smsm.shape[0]):
+    rc = smsm[r,:]
+    row_confs = ms.confnames_by_iconfs(rc.tolist())
+
+    print(f"{res_names[r]} |", *row_confs)
+    if r > 5:
+       break
+
+```
+
+```python
+smsm[:5,:5]
+res_names[:5]
+```
+
+# RESUME HERE
+
+```python
+def smsm_to_full_confids(smsm_data):
+    """Convert smsm matrix numbers (iconfs) to confIDs and add the
+    fixed residues in each selected state.
+    """
+
+    sel_indices = smsm_data["selection_indices"]
+    sel_energies = smsm_data["selection_energies"]
+    res_names = smsm_data["residue_names"]
+    smsm = smsm_data["smsm"]
+
+    #hdr = f"RESIDUE   | " + "".join([f"{x:<15}" for x in sel_indices])
+    #hdr = f"RESIDUE   | " + " ".join([f"{x:>14,.2f}" for x in sel_energies])
+    #print(hdr)
+    #print("_" * len(hdr))
+
+    for r in range(smsm.shape[0]):
+        rc = smsm[r,:]
+        row_confs = ms.confnames_by_iconfs(rc.tolist())
+        print(f"{res_names[r]} |", *row_confs)
 
 
-ms_sort_by = "count"
-c_sorted_ms_list = sampling.sort_microstate_list(ms.microstates, by=ms_sort_by)
-c_ms_cumsum, c_count_selection = sampling.sample_microstates(n_sample_size, c_sorted_ms_list)
-len(c_ms_cumsum), len(c_count_selection)
-c_count_selection
+    for i, c in enumerate(range(smsm.shape[1])):
+        rc = smsm[:,i]
+
+        # add fixed res
+        all_iconfs = sorted(ms.fixed_iconfs + rc)
+        selected_confs = ms.confnames_by_iconfs(all_iconfs)
+        print(f"{len(selected_confs)= }")
 
 
-e_ms_cumsum[:5]
-e_sorted_ms_list[:5]
-c_ms_cumsum[:5]
-c_sorted_ms_list[:5]
+        if c == 0:
+            break
+        # write pdb with one_pdb_confs; ms_index from smsm row 1
+        #ms_to_pdb(selected_confs: list, ms_index: int, mc_run: int, remark_data: str, step2_path: str, output_folder: str)
 
-def check_confs_byorder(sorted_ms_list, count_selection, ms_cumsum):
-    for c in count_selection[:3]:
-        print("c:",c)
-        ms_index = np.where((ms_cumsum - c) > 0)[0][0]
-        ms_selection = sorted_ms_list[ms_index]
-        print(ms_selection[0])
-        print(ms_selection[2]())
-        confs_for_pdb = sampling.get_selected_confs(ms, ms_selection)
-        print(confs_for_pdb[:5])
-        print("call io.ms_to_pdb")
+```
 
+<!-- #raw -->
+# selected MC run:
+MC = int(info[1].split("=")[1])
 
-check_confs_byorder(e_sorted_ms_list, e_count_selection, e_ms_cumsum)
-check_confs_byorder(c_sorted_ms_list, c_count_selection, c_ms_cumsum)
+# part of the info related to sampling:
+info_0 = info[0].split(", ")
+print(info_0)
+
+size = int(info_0[0].split("=")[1])
+kind = info_0[1].split("=")[1][1:-1]
+by = info_0[2].split('=')[1][1:-1]
+reverse = False if info_0[3].split("=")[1].startswith("F") else True
+
+reverse
+
+if v := info_0[4].split("=")[1] == "None":
+    seed = None
+else:
+    seed = int(v)
+print(v, seed)
 <!-- #endraw -->
 
 ```python
-# create pdbs from samples ms
-start_time = time.time()
-
-sampling.pdbs_from_ms_samples(ms,
-                              mcce_output_path,
-                              n_sample_size,
-                              ms_sort_by,
-                              output_dir,
-                              list_files=True)
-
-d = time.time() - start_time
-print(f"`sampling.pdbs_from_ms_samples` with sample size={n_sample_size:,} took {d/60:.2f} mins or {d:.2f} seconds")
+!ls -l {ms.msout_file_dir}
 ```
 
 ```python
-!head -n 20 ../tests/data/ms_out/pH5eH0ms/pdbs_from_ms/mc0_ms1.pdb
+n_sample_size = 4
+sample_kind =  "deterministic"
+ms_sort_by = "energy"
+save = True
+out_dir = Path.cwd()
+
+sampling.pdbs_from_smsm(ms,
+                        n_sample_size,
+                        sample_kind,
+                        sort_by = ms_sort_by,
+                        sort_reverse = False,
+                        seed = None,
+                        output_pdb_format = "standard",
+                        output_dir = out_dir,
+                        clear_pdbs_folder = False,
+                        list_files = True
+                       )
+
+```
+
+```python
+# Inspect a pdb head:
+
+!head -n 50 ./pdbs_from_ms/mc0_ms104828.pdb
+```
+
+<!-- #raw -->
+assert len(ms.fixed_residue_names) == len(ms.fixed_iconfs)
+
+for i, (res,conf) in enumerate(zip(ms.fixed_residue_names,ms.fixed_iconfs)):
+    print(i, res, conf)
+    if i > 10:
+        break
+
+for i, (res,confs) in enumerate(zip(ms.free_residue_names, ms.free_residues)):
+    print(i, res, confs)
+    if i > 10:
+        break
+<!-- #endraw -->
+
+```python
+
 ```
 
 ```python
 
 ```
+
+```python
+
+```
+
+---
+# TODO? PDB conversions
+
+<!-- #region -->
+## name.txt
+> Rename rule file contains rules to format atom names and residue names.
+ The purpose is to unify residue names to 3-char mcce names
+ and break some big cofactors into small ones.
+ Each line has two fields separated by at least one space. Each field
+ is 14 characters long, matching the atom, residue name, chainID and
+ sequence number field of a pdb line. The first string will be
+ replaced by the second string.
+ Symbol "*" in the first string is a wildcard that matchs any character.
+ It means "do not replace" in the second string.
+ The replace is accumulative in the order of appearing in this file.
+
+
+The first 3 lines:
+```python
+0123456789012  01234567890123
+***** *******  *****_********
+****** *****   ******_*******
+******* ***  > *******_****
+```
+mean: replace a space in position 5, 6 or 7 by "_".
+
+**
+<!-- #endregion -->
+
+```python
+nametxt = mcce_dir.joinpath("name.txt")
+nametxt
+
+# use when running subprocesses from this nbk
+nametxt2 = nametxt.relative_to(Path.cwd().parent)
+nametxt2
+```
+
+```python
+import re
+from collections import defaultdict
+
+
+regex = r'^\*{5,8}\s\*{5,}\s\s'
+split_tag = "*@@"
+
+mcce_to_pdb_name_dict = defaultdict(list)
+with open(nametxt) as f:
+    for i, line in enumerate(f):
+        if (line.startswith("#")
+            or line.startswith(" D")
+            or re.match(regex, line)
+           ):
+            continue
+        if len(line) <29:
+            continue
+
+        line = line[:30].replace("*  ", split_tag)
+        from_str, to_str = line.split(split_tag)[:2]
+        mcce_to_pdb_name_dict[to_str].append(from_str)
+
+```
+
+```python
+#pp(mcce_to_pdb_name_dict)
+```
+
+```python
+s = "***** NA******  *****_NA******"
+x = "012345678901234567890123456789"
+len(s), len(x)
+```
+
+<!-- #raw -->
+gr_data = subprocess.check_output(
+                f"grep -E 'Gehan' ../{nametxt2}",  # | sed -e 's/(//g; s/MONTE_//g; s/)//g'",
+                stderr=subprocess.STDOUT,
+                shell=True,).decode().splitlines()
+
+gr_data
+<!-- #endraw -->
+
+<!-- #raw -->
+# in pymccelib.py
+
+# env = Env()
+def pdb2mcce(self, pdb):
+        """Convert pdb to mcce pdb"""
+        atom_exceptions = [" H2 ", " OXT", " HXT"]
+        mccelines = []
+        lines = [x for x in open(pdb).readlines() if x[:6] == "ATOM  " or x[:6] == "HETATM"]
+
+        icount = 0
+        previous_resid = ()
+        possible_confs = []
+        for line in lines:
+            # pdb line
+            atomname = line[12:16]
+            resname = line[17:20]
+            chainid = line[21]
+            seqnum = int(line[22:26])
+            icode = line[26]
+            xyz = line[30:54]
+
+            current_resid = (resname, chainid, seqnum, icode)
+            # mcce line, need to add conf_number, radius, charge, conf_type, conf_history
+            if current_resid != previous_resid:
+                possible_confs = [x.strip() for x in env.tpl[("CONFLIST", resname)].split(",")]
+                logging.info("Identified a new residue %s: %s" % (resname, ", ".join(possible_confs)))
+                previous_resid = current_resid
+            Found = False
+            for confname in possible_confs:
+                if atomname in env.atomnames[confname]:
+                    conf_type = confname[3:5]
+                    conf_number = possible_confs.index(confname)
+                    cname = confname
+                    Found = True
+                    break
+            if not Found:
+                # this atom is not found in all conformers
+                if atomname not in atom_exceptions:
+                    print("Atom \"%s\" in pdb file %s can not be assigned to any conformer" % (atomname, pdb))
+                continue
+
+            key = ("RADIUS", cname, atomname)
+            if key in env.tpl:
+                radius_str = env.tpl[key]
+                rad, _, _ = radius_str.split(",")
+                rad = float(rad)
+            else:
+                rad = 0.0
+
+            key = ("CHARGE", cname, atomname)
+            if key in env.tpl:
+                charge_str = env.tpl[key]
+                crg = float(charge_str)
+            else:
+                crg = 0.0
+
+            conf_history = "________"
+            newline = "ATOM  %5d %4s %s %c%4d%c%03d%s%8.3f    %8.3f      %s%s\n" % \
+                      (icount, atomname, resname, chainid, seqnum, icode, conf_number, xyz, rad, crg, conf_type, conf_history)
+            mccelines.append(newline)
+            icount += 1
+
+        return mccelines
+
+<!-- #endraw -->

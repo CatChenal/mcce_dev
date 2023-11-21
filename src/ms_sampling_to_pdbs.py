@@ -107,7 +107,6 @@ REMARK 250   MATRIX FILE NAME              : {npzfile}
 REMARK 250   MATRIX SHAPE                  : {smsm_shape}
 REMARK 250   MATRIX CREATION DATE          : {smsm_date}
 REMARK 250   MICROSTATE SELECTION INDEX    : {MS_sel:,}
-REMARK 250   MICROSTATE CREATION INDEX     : {MS_idx:,}
 REMARK 250   SELECTED MICROSTATE ENERGY    : {E:,.2f} (kcal/mol)
 REMARK 250 EXPERIMENTAL CONDITIONS
 REMARK 250   TEMPERATURE                   : {T:.2f} (K)
@@ -160,7 +159,14 @@ def get_npz_filename(MC: int, size: int, kind: str, sort_by: str, reverse: bool)
 
 
 def get_output_filename(
-    MC: int, kind: str, sort_by: str, reverse: bool, size: Union[int,None]=None, sel_index:Union[int,None]=None, for_pdb=False) -> str:
+    MC: int,
+    kind: str,
+    sort_by: str,
+    reverse: bool,
+    size: Union[int, None] = None,
+    sel_index: Union[int, None] = None,
+    for_pdb=False,
+) -> str:
     """Construct the name of the smsm data .npz file (default) or that of a pdb file if `for_pdb` is True."""
 
     k = kind[0].lower()
@@ -638,7 +644,7 @@ class MS:
         mcce_output_path: str,
         pH: Union[int, float],
         Eh: Union[int, float],
-        overwrite_split_files: bool = False
+        overwrite_split_files: bool = False,
     ):
         """MS.init
 
@@ -857,7 +863,7 @@ class MS:
             ms_list: List of Microstates,
             ms_indices: List of selection indices for the ms_list used,
             info: List of sampling information, i.e.: size, kind, sort key and order, seed
-                  whichever applies depending on kind.
+                  which ever one applies depending on kind.
         """
 
         kind = kind.lower()
@@ -881,15 +887,18 @@ class MS:
             sampled_ms_indices = np.arange(
                 size, self.counts - size, self.counts / size, dtype=int
             )
-            info = [f"{size=}, {kind=}, {sort_by=}, {reverse=}"]
+            # info = [f"{size=}, {kind=}, {sort_by=}, {reverse=}"]
         else:
             ms_list = self.microstates
             rng = np.random.default_rng(seed=seed)
             sampled_ms_indices = rng.integers(
                 low=0, high=len(self.microstates), size=size, endpoint=True
             )
-            info = [f"{size=}, {kind=}, {seed=}"]
+            # info = [f"{size=}, {kind=}, {seed=}"]
 
+        # undifferentiated params:
+
+        info = [f"{size=}, {kind=}, {sort_by=}, {reverse=}, {seed=}"]
         info.append(f"MC={self.selected_MC}")
         sampled_cumsum = np.cumsum([mc.count for mc in ms_list])
         if kind == "random":
@@ -1008,7 +1017,7 @@ class MS:
         [Ref]: https://www.wwpdb.org/documentation/file-format-content/format33/remarks1.html
 
         Note: sampling_info format (list):
-              0: [f"{size=}, {kind=}, {sort_by=}, {reverse=}"],
+              0: [f"{size=}, {kind=}, {sort_by=}, {reverse=}, {seed=}"],
               1: f"MC={self.selected_MC},
               2: state matrix shape: f"{smsm.shape}"
               3: state matrix date: datetime.today().strftime("%d-%b-%y %H:%M:%S")
@@ -1046,8 +1055,9 @@ def get_smsm(
     only_save: bool = False,
 ) -> Union[np.ndarray, None]:
     """
-    Return the Sampled Microstates State Matrix (smsm) for free residues as part of a tuple:
-    (info, selection_energies, smsm) if `only_save` is False (default). If `save_to_npz` is 
+    Create the Sampled Microstates State Matrix (smsm) for free residues.
+    Return None if argument `only_save` is True (default is False), else return a
+    tuple: (info, selection_energies, smsm). If `save_to_npz` is
     True (default), the same tuple is saved into a numpy `.npz` file.
     Args:
         ms (MS): A MS class instance.
@@ -1070,33 +1080,44 @@ def get_smsm(
         ms_list = ms.microstates
 
     selection_energies = []
-    top_rows = 2
-    smsm = np.ones((len(ms.free_residues) + top_rows, n_sample_size), dtype=int) * -1
+    res_names = []
 
-    for i, x in enumerate(ms_indices):
+    smsm = np.ones((len(ms.free_residues), n_sample_size), dtype=int) * -9
+
+    for c, x in enumerate(ms_indices):
         sampled_ms = ms_list[x]
+        selection_energies.append(sampled_ms.E)
+
         selected_iconfs = ms.get_selected_confs(
             sampled_ms, output_val="iconf", include_fixed=False
         )
-        smsm[0, i] = x  # row 0 :: ms selection index
-        smsm[1, i] = sampled_ms.idx  # row 1 :: selected_ms.idx
-        selection_energies.append(sampled_ms.E)
+        # smsm[0, c] = x  # row 0 :: ms selection index
+        # smsm[1, c] = sampled_ms.idx  # row 1 :: selected_ms.idx
 
-        for r, iconf in enumerate(selected_iconfs, start=2):
-            smsm[r, i] = iconf
+        for r, iconf in enumerate(selected_iconfs):
+            res_names.append(ms.free_residue_names[ms.ires_by_iconf[iconf]])
+            smsm[r, c] = iconf
 
     info.append(f"{smsm.shape}")
     info.append(datetime.today().strftime("%d-%b-%y %H:%M:%S"))
     if save_to_npz:
         fname = get_output_filename(
-            ms.selected_MC, sample_kind, sort_by, reverse, size=n_sample_size)
+            ms.selected_MC, sample_kind, sort_by, reverse, size=n_sample_size
+        )
         npz_file = ms.msout_file_dir.joinpath(fname)
         info.append(npz_file)
 
         if npz_file.exists():
             npz_file.unlink()
 
-        save_npz(npz_file, info=info, sel_energies=selection_energies, smsm=smsm)
+        save_npz(
+            npz_file,
+            info=info,
+            selection_indices=ms_indices,
+            selection_energies=selection_energies,
+            residue_names=res_names,
+            smsm=smsm,
+        )
         if only_save:
             return
 
@@ -1114,36 +1135,28 @@ def smsm_data_info_to_dict(smsm_data_info: np.ndarray) -> dict:
 
     size = int(info_0[0].split("=")[1])
     kind = info_0[1].split("=")[1][1:-1]
-
-    if not_random := (kind == "deterministic"):
-         by = info_0[2].split('=')[1][1:-1]
-         reverse = False if info_0[3].split("=")[1].startswith("F") else True
+    by = info_0[2].split("=")[1][1:-1]
+    reverse = False if info_0[3].split("=")[1].startswith("F") else True
+    if v := info_0[4].split("=")[1] == "None":
+        seed = None
     else:
-        if v := info_0[2].split("=")[1] == "None":
-            seed = None
-        else:
-            seed = int(v)
-
+        seed = int(v)
     # matrix shape:
     smsm_shape = tuple(int(i) for i in smsm_data_info[2][1:-1].split(", "))
 
-    if not_random:
-        return dict([("MC",MC),
-                     ("size",size),
-                     ("kind",kind),
-                     ("by",by),
-                     ("reverse",reverse),
-                     ("smsm_shape",smsm_shape),
-                     ("smsm_date",smsm_data_info[3]),
-                     ("smsm_data_file",smsm_data_info[4])])
-    else:
-        return dict([("MC",MC),
-             ("size",size),
-             ("kind",kind),
-             ("seed",seed),
-             ("smsm_shape",smsm_shape),
-             ("smsm_date",smsm_data_info[3]),
-             ("smsm_data_file",smsm_data_info[4])])
+    return dict(
+        [
+            ("MC", MC),
+            ("size", size),
+            ("kind", kind),
+            ("by", by),
+            ("reverse", reverse),
+            ("seed", seed),
+            ("smsm_shape", smsm_shape),
+            ("smsm_date", smsm_data_info[3]),
+            ("smsm_data_file", smsm_data_info[4]),
+        ]
+    )
 
 
 def get_ms_from_smsm(ms: MS, smsm_data: np.ndarray, col_index: int):
@@ -1155,13 +1168,11 @@ def get_ms_from_smsm(ms: MS, smsm_data: np.ndarray, col_index: int):
 
     info_dict = smsm_data_info_to_dict(smsm_data["info"])
     if info_dict["kind"] == "deterministic":
-        ms_list = ms.sort_microstates(by=info_dict["by"],
-                                      reverse=info_dict["reverse"])
+        ms_list = ms.sort_microstates(by=info_dict["by"], reverse=info_dict["reverse"])
     else:
         ms_list = ms.microstates
 
-    smsm = smsm_data["smsm"]
-    sel_index = smsm[0, col_index]
+    sel_index = smsm_data["selection_indices"][col_index]
 
     return ms_list[sel_index]
 
@@ -1234,7 +1245,7 @@ def pdbs_from_smsm(
     clear_pdbs_folder: bool = False,
     list_files: bool = False,
 ) -> None:
-    """Create `n_sample_size` MCCE_PDB files in `output_dir/pdbs_from_ms`.
+    """Create `n_sample_size` MCCE_PDB files in `output_dir/`.
 
     Args:
         ms (MS): A MS msout file microstates class instance.
@@ -1246,7 +1257,7 @@ def pdbs_from_smsm(
         sort_reverse (bool, False): If True, descending order.
             Only applies if `sample_kind` is "deterministic".
         seed (int|None, None): Seed for random number generator.
-        output_dir (str, None): Output folder path. Folder "output_dir/pdbs_from_ms"
+        output_dir (str, None): Output folder path. Folder "output_dir/"
             will be created if necessary.
         clear_pdbs_folder (bool, False): Whether to delete existing pdb files.
         list_files (bool, False): Whether to list output folder contents.
@@ -1260,7 +1271,7 @@ def pdbs_from_smsm(
         sort_by = sort_by.lower()
 
     fname = get_output_filename(
-            ms.selected_MC, sample_kind, sort_by, sort_reverse, size=n_sample_size
+        ms.selected_MC, sample_kind, sort_by, sort_reverse, size=n_sample_size
     )
     npz_file = ms.msout_file_dir.joinpath(fname)
     if not npz_file.exists():
@@ -1280,21 +1291,26 @@ def pdbs_from_smsm(
     print(f"\tReading {npz_file}")
 
     info = smsm_data["info"]
+    selection_indices = smsm_data["selection_indices"]
     selection_energies = smsm_data["sel_energies"]
+    residues_names = smsm_data["residues_names"]
     smsm = smsm_data["smsm"]
 
     info_dict = smsm_data_info_to_dict(smsm_data["info"])
     MC = info_dict["MC"]
     kind = info_dict["kind"]
-    by, reverse = "", False
-    if kind == "deterministic":
-        by = info_dict["by"]
-        reverse = info_dict["reverse"]
+    # by, reverse = "", False
+    # if kind == "deterministic":
+    by = info_dict["by"]
+    reverse = info_dict["reverse"]
 
     step2_path = ms.mcce_out.joinpath("step2_out.pdb")
+
     if not output_dir or output_dir is None:
-        output_dir = ms.msout_file_dir
-    pdb_out_folder = Path(output_dir).joinpath("pdbs_from_ms")
+        pdb_out_folder = ms.msout_file_dir
+    else:
+        pdb_out_folder = Path(output_dir)  # .joinpath("pdbs_from_ms")
+
     if not pdb_out_folder.exists():
         Path.mkdir(pdb_out_folder)
     elif clear_pdbs_folder:
@@ -1302,32 +1318,29 @@ def pdbs_from_smsm(
 
     # Summarize what's being done:
     print(
-        f"\tCreating n={n_sample_size:,} MCCE_PDB files in {output_dir} from n microstates sorted by '{sort_by}'.\n"
+        f"\tCreating n={n_sample_size:,} MCCE_PDB files in {pdb_out_folder} from n microstates sorted by '{by}'.\n"
     )
 
-    for c in range(smsm.shape[1]):
-        sel_index = smsm[0, c]
-        ms_idx = smsm[0, c]
-        remark_data = ms.get_pdb_remark(sel_index, ms_idx, selection_energies[c], info)
+    for i, sel_index in enumerate(selection_indices):
+        # ms_idx = smsm[0, c]
+        # remark_data = ms.get_pdb_remark(sel_index, ms_idx, selection_energies[c], info)
+        remark_data = ms.get_pdb_remark(sel_index, selection_energies[c], info)
 
-        free = smsm[2:, c].tolist()
+        free = smsm[:, sel_index].tolist()
         # add fixed confs
         all_iconfs = sorted(ms.fixed_iconfs + free)
         confs_for_pdb = ms.confnames_by_iconfs(all_iconfs)
 
         # write the pdb in the folder
-        pdb_name = get_output_filename(MC, kind, by, reverse, sel_index=sel_index, for_pdb=True)
+        pdb_name = get_output_filename(
+            MC, kind, by, reverse, sel_index=sel_index, for_pdb=True
+        )
         pdb_path = pdb_out_folder.joinpath(pdb_name)
         if pdb_path.exists():
             print(f"\tFile already exists: {pdb_path}.")
             continue
 
-        ms_to_pdb(
-            confs_for_pdb,
-            remark_data,
-            step2_path,
-            pdb_path
-        )
+        ms_to_pdb(confs_for_pdb, remark_data, step2_path, pdb_path)
 
     print("\tPDB files creation over.")
     if list_files:
@@ -1418,7 +1431,7 @@ def ms2pdbs_parser():
         default=None,
         help="""The path of the folder receiving the created pdb files. If not provided, the path
         defaults to mcce_dir/ms_out/msout_file_dir/pdbs_from_ms, otherwise the actual output folder
-        will be: output_dir/pdbs_from_ms; default: %(default)s.""",
+        will be: output_dir/; default: %(default)s.""",
     )
     # Optional arguments:
     p.add_argument(
