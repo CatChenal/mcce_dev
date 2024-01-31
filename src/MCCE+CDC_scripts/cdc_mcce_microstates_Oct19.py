@@ -1,16 +1,16 @@
 import os
+
 import numpy as np
-import gromacs
 
-gromacs.config.setup()
-from pymembrane.util.CDC.run_cdc import *
-from matplotlib.pyplot import rcParams
+from pymembrane.structure.atomic_pigment import ChlorophyllAtomic
+from pymembrane.structure.atomic_protein import ProteinAtomic
+from pymembrane.structure.atomic_supercomplex import SupercomplexAtomic
+from pymembrane.structure.atomic_sitenergy import (
+    calculate_cdc_site_shift,
+    calculate_total_site_energy,
+)
+from pymembrane.structure.dynamic_structure import DynamicStructure
 
-dict_cofactors = {
-    "SQD": dict_compelete_SQD_mcce,
-    "HOH": dict_HOH_semiempirical,
-    "BCR": dict_BCR_antechamber,
-}
 
 # path to the mc pdbs dir:
 # dir = 'PATH_TO_YOUR_MS_PDB_DIRECTORY_WHERE_YOU_WILL_RUN_CDC_CALCULATION'
@@ -35,23 +35,7 @@ for filename in os.listdir(dir):
             extended_pdb_name = f"extended_{pdb_name}.pdb"
             list_ligands = ["CLA", "BCR", "SQD", "HOH"]
             md_object = DynamicStructure(path_scratch=md_scratch_dir)
-            # md_object.prepare_minimization(pdb_path=pdb_path,
-            #                                protein_force_field='amber99',
-            #                                list_ligands=list_ligands,
-            #                                dict_update_residue={'D0003': 'ASP',
-            #                                                     'D0179': 'ASP',
-            #                                                     'C0179': 'ASP',
-            #                                                     'C0003': 'ASP',
-            #                                                     'B0179': 'ASP',
-            #                                                     'B0004': 'GLU',
-            #                                                     'A0179': 'ASP'},
-            #                                water_forceField='tip4p',
-            #                                ignh=False,
-            #                                minimize_ligand=False,
-            #                                run_minimization=False
-            #                                )
 
-            # md_object.build_extended_pdb(dict_cofactors)
             protein_atomic = ProteinAtomic(
                 f"{dir}{filename}", "Isia", center_atomic=False, set_atomic_charges=True
             )

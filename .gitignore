@@ -34,11 +34,35 @@ __pycache__/
 # wsl tracks
 *:Zone.Identifier
 
-# Note: a lot of the following items
-# could be taken care of by Makefile:
-# Prerequisites
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Prerequisites, obj
 *.d
-# Object files
 *.o
 *.ko
 *.obj
